@@ -1,0 +1,255 @@
+import Foundation
+
+class SyncEngine {
+    let client: BeeperClient
+    let logWriter: LogWriter
+    let metadataWriter: MetadataWriter
+    let attachmentFetcher: AttachmentFetcher
+    let stateStore: StateStore
+    let config: Config
+
+    init(config: Config) {
+        self.config = config
+        self.client = BeeperClient(
+            baseURL: config.beeperURL,
+            token: config.beeperToken ?? ""
+        )
+        self.logWriter = LogWriter(baseDir: config.logDir)
+        self.metadataWriter = MetadataWriter()
+        self.attachmentFetcher = AttachmentFetcher(
+            client: client, logWriter: logWriter
+        )
+        self.stateStore = StateStore(path: config.stateFile)
+    }
+
+    /// Run a single poll cycle: check all chats for new messages
+    func pollOnce() async throws {
+        var cursor: String? = nil
+        var allChats: [Chat] = []
+
+        // Fetch all chats (paginate)
+        repeat {
+            let response = try await client.listChats(cursor: cursor)
+            allChats.append(contentsOf: response.items)
+            if response.hasMore, let last = response.items.last {
+                cursor = last.lastActivity
+            } else {
+                break
+            }
+        } while true
+
+        for chat in allChats {
+            let storedActivity = stateStore.lastActivity(for: chat.id)
+
+            // Skip chats that haven't changed since last poll
+            if let stored = storedActivity, let current = chat.lastActivity,
+               stored == current {
+                continue
+            }
+
+            try await syncChat(chat)
+        }
+
+        try stateStore.save()
+    }
+
+    /// Fetch and log new messages for a single chat
+    func syncChat(_ chat: Chat) async throws {
+        // Update metadata
+        let chatDir = logWriter.chatDir(network: chat.network, chatTitle: chat.title)
+        try FileManager.default.createDirectory(
+            atPath: chatDir, withIntermediateDirectories: true
+        )
+        let metadata = buildMetadata(from: chat)
+        try metadataWriter.write(metadata: metadata, toDir: chatDir)
+
+        // Fetch messages newer than our last seen sort key
+        let lastSortKey = stateStore.lastSortKey(for: chat.id)
+        var newMessages: [Message] = []
+        var msgCursor: String? = lastSortKey
+        let direction: String? = lastSortKey != nil ? "after" : nil
+
+        repeat {
+            let response = try await client.listMessages(
+                chatID: chat.id,
+                cursor: msgCursor,
+                direction: direction
+            )
+            newMessages.append(contentsOf: response.items)
+            if response.hasMore, let last = response.items.last?.sortKey {
+                msgCursor = last
+            } else {
+                break
+            }
+        } while true
+
+        // Filter out already-seen messages and sort by timestamp
+        let filtered = newMessages.filter { msg in
+            guard let sortKey = msg.sortKey, let last = lastSortKey else { return true }
+            return sortKey > last
+        }
+
+        // Write messages
+        for message in filtered {
+            let date = extractDate(from: message.timestamp)
+
+            // Download attachments
+            var attachmentRecords: [AttachmentRecord] = []
+            for attachment in message.attachments ?? [] {
+                let localPath = try await attachmentFetcher.fetch(
+                    attachment: attachment,
+                    network: chat.network,
+                    chatTitle: chat.title,
+                    date: date
+                )
+                attachmentRecords.append(AttachmentRecord(
+                    id: attachment.id,
+                    type: attachment.type,
+                    localPath: localPath,
+                    mimeType: attachment.mimeType,
+                    fileName: attachment.fileName
+                ))
+            }
+
+            let record = MessageRecord(
+                id: message.id,
+                chatId: chat.id,
+                network: chat.network,
+                chatTitle: chat.title,
+                senderId: message.senderID,
+                senderName: message.senderName,
+                timestamp: message.timestamp,
+                text: message.text,
+                isSender: message.isSender ?? false,
+                type: message.type,
+                attachments: attachmentRecords,
+                replyTo: message.linkedMessageID
+            )
+            try logWriter.write(record: record)
+        }
+
+        // Update state
+        if let lastMsg = filtered.last {
+            stateStore.update(
+                chatID: chat.id,
+                lastSortKey: lastMsg.sortKey,
+                lastActivity: chat.lastActivity
+            )
+        } else if let activity = chat.lastActivity {
+            stateStore.update(
+                chatID: chat.id,
+                lastSortKey: nil,
+                lastActivity: activity
+            )
+        }
+    }
+
+    /// Full backfill: paginate backward through all messages in a chat
+    @discardableResult
+    func backfillChat(_ chat: Chat) async throws -> Int {
+        let chatDir = logWriter.chatDir(network: chat.network, chatTitle: chat.title)
+        try FileManager.default.createDirectory(
+            atPath: chatDir, withIntermediateDirectories: true
+        )
+        let metadata = buildMetadata(from: chat)
+        try metadataWriter.write(metadata: metadata, toDir: chatDir)
+
+        var allMessages: [Message] = []
+        var cursor: String? = nil
+
+        // Paginate backward (default direction) to get all history
+        repeat {
+            let response = try await client.listMessages(
+                chatID: chat.id,
+                cursor: cursor,
+                direction: cursor != nil ? "before" : nil
+            )
+            allMessages.append(contentsOf: response.items)
+            if response.hasMore, let last = response.items.last?.sortKey {
+                cursor = last
+            } else {
+                break
+            }
+        } while true
+
+        // Sort chronologically and write
+        let sorted = allMessages.sorted { ($0.sortKey ?? "") < ($1.sortKey ?? "") }
+        for message in sorted {
+            let date = extractDate(from: message.timestamp)
+            var attachmentRecords: [AttachmentRecord] = []
+            for attachment in message.attachments ?? [] {
+                let localPath = try await attachmentFetcher.fetch(
+                    attachment: attachment,
+                    network: chat.network,
+                    chatTitle: chat.title,
+                    date: date
+                )
+                attachmentRecords.append(AttachmentRecord(
+                    id: attachment.id,
+                    type: attachment.type,
+                    localPath: localPath,
+                    mimeType: attachment.mimeType,
+                    fileName: attachment.fileName
+                ))
+            }
+
+            let record = MessageRecord(
+                id: message.id,
+                chatId: chat.id,
+                network: chat.network,
+                chatTitle: chat.title,
+                senderId: message.senderID,
+                senderName: message.senderName,
+                timestamp: message.timestamp,
+                text: message.text,
+                isSender: message.isSender ?? false,
+                type: message.type,
+                attachments: attachmentRecords,
+                replyTo: message.linkedMessageID
+            )
+            try logWriter.write(record: record)
+        }
+
+        // Update state to latest message
+        if let lastMsg = sorted.last {
+            stateStore.update(
+                chatID: chat.id,
+                lastSortKey: lastMsg.sortKey,
+                lastActivity: chat.lastActivity
+            )
+            try stateStore.save()
+        }
+
+        return sorted.count
+    }
+
+    // MARK: - Helpers
+
+    private func buildMetadata(from chat: Chat) -> ChatMetadata {
+        let now = ISO8601DateFormatter().string(from: Date())
+        return ChatMetadata(
+            chatId: chat.id,
+            accountId: chat.accountID,
+            network: chat.network,
+            title: chat.title,
+            type: chat.type,
+            participants: chat.participants.items.map { user in
+                ParticipantInfo(
+                    id: user.id,
+                    name: user.fullName ?? user.username,
+                    phone: user.phoneNumber,
+                    isSelf: user.isSelf ?? false
+                )
+            },
+            firstSeen: now,
+            lastUpdated: now
+        )
+    }
+
+    private func extractDate(from timestamp: String) -> String {
+        if let tIndex = timestamp.firstIndex(of: "T") {
+            return String(timestamp[timestamp.startIndex..<tIndex])
+        }
+        return String(timestamp.prefix(10))
+    }
+}
