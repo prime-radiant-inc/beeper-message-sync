@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.primeradiant.beeper-message-sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jesse/prime-radiant/beeper-message-sync/.build/release/beeper-message-sync</string>
+        <string>watch</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/jesse/prime-radiant/beeper-message-sync</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/jesse/beeper-message-sync/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jesse/beeper-message-sync/daemon.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/jesse</string>
+    </dict>
+</dict>
+</plist>
