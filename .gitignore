@@ -1,0 +1,6 @@
+.env
+.build/
+.swiftpm/
+state.json
+logs/
+daemon.log
