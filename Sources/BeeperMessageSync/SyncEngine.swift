@@ -148,11 +148,13 @@ class SyncEngine {
 
             let record = MessageRecord(
                 id: message.id,
-                senderId: message.senderID,
-                senderName: message.senderName,
-                timestamp: message.timestamp,
+                ts: message.timestamp,
+                from: Sender(
+                    id: message.senderID,
+                    name: message.senderName,
+                    self: message.isSender
+                ),
                 text: message.text,
-                isSender: message.isSender ?? false,
                 type: message.type,
                 attachments: attachmentRecords,
                 replyTo: message.linkedMessageID
@@ -251,11 +253,13 @@ class SyncEngine {
 
             let record = MessageRecord(
                 id: message.id,
-                senderId: message.senderID,
-                senderName: message.senderName,
-                timestamp: message.timestamp,
+                ts: message.timestamp,
+                from: Sender(
+                    id: message.senderID,
+                    name: message.senderName,
+                    self: message.isSender
+                ),
                 text: message.text,
-                isSender: message.isSender ?? false,
                 type: message.type,
                 attachments: attachmentRecords,
                 replyTo: message.linkedMessageID

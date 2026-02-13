@@ -2,16 +2,51 @@ import Foundation
 
 // MARK: - Output record types
 
-struct MessageRecord: Codable {
+struct Sender: Codable {
+    let id: String?
+    let name: String?
+    let `self`: Bool?
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encodeIfPresent(name, forKey: .name)
+        // Only encode self when true
+        if self.`self` == true {
+            try container.encode(true, forKey: .`self`)
+        }
+    }
+}
+
+struct MessageRecord: Encodable {
     let id: String
-    let senderId: String?
-    let senderName: String?
-    let timestamp: String
+    let ts: String
+    let from: Sender
     let text: String?
-    let isSender: Bool
     let type: String?
     let attachments: [AttachmentRecord]
     let replyTo: String?
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(ts, forKey: .ts)
+        try container.encode(from, forKey: .from)
+        try container.encodeIfPresent(text, forKey: .text)
+        // Omit type when "TEXT" (the common case)
+        if let type, type.uppercased() != "TEXT" {
+            try container.encode(type, forKey: .type)
+        }
+        // Omit attachments when empty
+        if !attachments.isEmpty {
+            try container.encode(attachments, forKey: .attachments)
+        }
+        try container.encodeIfPresent(replyTo, forKey: .replyTo)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, ts, from, text, type, attachments, replyTo
+    }
 }
 
 struct AttachmentRecord: Codable {
@@ -20,6 +55,15 @@ struct AttachmentRecord: Codable {
     let localPath: String?
     let mimeType: String?
     let fileName: String?
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encodeIfPresent(localPath, forKey: .localPath)
+        try container.encodeIfPresent(mimeType, forKey: .mimeType)
+        try container.encodeIfPresent(fileName, forKey: .fileName)
+    }
 }
 
 // MARK: - LogWriter
@@ -38,7 +82,7 @@ class LogWriter {
     func write(record: MessageRecord, toDir dirPath: String) throws {
         try fm.createDirectory(atPath: dirPath, withIntermediateDirectories: true)
 
-        let date = extractDate(from: record.timestamp)
+        let date = extractDate(from: record.ts)
         let filePath = "\(dirPath)/\(date).jsonl"
 
         let data = try encoder.encode(record)
