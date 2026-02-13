@@ -56,10 +56,12 @@ func runBackfill(engine: SyncEngine) async throws {
     var chatIndex = 0
     var failCount = 0
     var skipCount = 0
+    var seenIDs = Set<String>()
 
     repeat {
         let response = try await engine.client.listChats(cursor: cursor)
         for chat in response.items {
+            guard seenIDs.insert(chat.id).inserted else { continue }
             chatIndex += 1
             let resolved = engine.resolvedTitle(for: chat)
             if !engine.filter.matchesChat(chat, resolvedTitle: resolved) {
@@ -76,6 +78,7 @@ func runBackfill(engine: SyncEngine) async throws {
             }
         }
         if response.hasMore, let last = response.items.last?.lastActivity {
+            if last == cursor { break }
             cursor = last
         } else {
             break
