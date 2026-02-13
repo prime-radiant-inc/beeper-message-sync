@@ -28,7 +28,8 @@ final class SyncEngineTests: XCTestCase {
                 "BEEPER_URL": config.beeperURL,
                 "LOG_DIR": tmpDir!,
                 "STATE_FILE": stateFile,
-            ])
+            ]),
+            contactResolver: ContactResolver()
         )
 
         do {
@@ -52,7 +53,8 @@ final class SyncEngineTests: XCTestCase {
                 "BEEPER_URL": config.beeperURL,
                 "LOG_DIR": tmpDir!,
                 "STATE_FILE": stateFile,
-            ])
+            ]),
+            contactResolver: ContactResolver()
         )
 
         let chats: ChatListResponse

@@ -7,6 +7,7 @@ struct ChatMetadata: Codable {
     let accountId: String
     let network: String
     let title: String
+    let resolvedTitle: String?
     let type: String
     let participants: [ParticipantInfo]
     let firstSeen: String
@@ -42,6 +43,7 @@ struct MetadataWriter {
                 accountId: metadata.accountId,
                 network: metadata.network,
                 title: metadata.title,
+                resolvedTitle: metadata.resolvedTitle,
                 type: metadata.type,
                 participants: metadata.participants,
                 firstSeen: existing.firstSeen,
