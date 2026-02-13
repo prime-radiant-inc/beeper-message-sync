@@ -11,10 +11,10 @@ struct Config {
         self.beeperToken = env["BEEPER_TOKEN"]
         self.beeperURL = env["BEEPER_URL"] ?? "http://localhost:23373"
         self.logDir = env["LOG_DIR"]
-            ?? NSHomeDirectory() + "/beeper-message-sync/logs"
+            ?? NSHomeDirectory() + "/Dropbox/Beeper-Sync/logs"
         self.pollInterval = Int(env["POLL_INTERVAL"] ?? "") ?? 5
         self.stateFile = env["STATE_FILE"]
-            ?? NSHomeDirectory() + "/beeper-message-sync/state.json"
+            ?? NSHomeDirectory() + "/Dropbox/Beeper-Sync/state.json"
     }
 
     static func load(from dotEnvPath: String) -> Config {

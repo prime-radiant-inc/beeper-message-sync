@@ -16,9 +16,9 @@
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/jesse/beeper-message-sync/daemon.log</string>
+    <string>/Users/jesse/Dropbox/Beeper-Sync/daemon.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/jesse/beeper-message-sync/daemon.log</string>
+    <string>/Users/jesse/Dropbox/Beeper-Sync/daemon.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>

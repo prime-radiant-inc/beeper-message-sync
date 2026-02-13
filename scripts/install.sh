@@ -11,7 +11,7 @@ cd "$SCRIPT_DIR"
 swift build -c release
 
 echo "Creating log directory..."
-mkdir -p "$HOME/beeper-message-sync"
+mkdir -p "$HOME/Dropbox/Beeper-Sync"
 
 echo "Installing launchd plist..."
 # Unload if already loaded
@@ -20,5 +20,5 @@ cp "$PLIST_SRC" "$PLIST_DEST"
 launchctl bootstrap "gui/$(id -u)" "$PLIST_DEST"
 
 echo "Done. Service is running."
-echo "  Logs: $HOME/beeper-message-sync/daemon.log"
+echo "  Logs: $HOME/Dropbox/Beeper-Sync/daemon.log"
 echo "  Stop: launchctl bootout gui/$(id -u)/$PLIST_NAME"
