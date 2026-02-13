@@ -8,27 +8,35 @@ struct ContactResolver: Sendable {
         self.phoneToName = phoneToName
     }
 
-    /// Build a resolver by enumerating all macOS Contacts
+    /// Build a resolver by enumerating all macOS Contacts.
+    /// Uses a timeout to prevent hanging in launchd daemon context where
+    /// Contacts framework XPC calls can block indefinitely.
     static func load() -> ContactResolver {
-        let store = CNContactStore()
-        var status = CNContactStore.authorizationStatus(for: .contacts)
+        let semaphore = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var result = ContactResolver()
 
-        if status == .notDetermined {
-            let semaphore = DispatchSemaphore(value: 0)
-            nonisolated(unsafe) var granted = false
-            store.requestAccess(for: .contacts) { ok, _ in
-                granted = ok
-                semaphore.signal()
-            }
-            semaphore.wait()
-            status = granted ? .authorized : .denied
+        DispatchQueue.global(qos: .utility).async {
+            result = loadFromContacts()
+            semaphore.signal()
         }
 
+        let timeout = semaphore.wait(timeout: .now() + 10)
+        if timeout == .timedOut {
+            print("  Contacts lookup timed out — phone numbers won't be resolved")
+            return ContactResolver()
+        }
+        return result
+    }
+
+    private static func loadFromContacts() -> ContactResolver {
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+
         guard status == .authorized else {
-            print("  Contacts access not available (status: \(status.rawValue)) — phone numbers won't be resolved")
+            print("  Contacts access not available (status: \(status.rawValue)) — grant access in System Settings > Privacy & Security > Contacts")
             return ContactResolver()
         }
 
+        let store = CNContactStore()
         var cache: [String: String] = [:]
         let keys: [CNKeyDescriptor] = [
             CNContactGivenNameKey as CNKeyDescriptor,
