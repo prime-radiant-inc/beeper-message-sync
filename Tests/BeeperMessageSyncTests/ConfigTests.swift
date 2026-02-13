@@ -6,7 +6,7 @@ final class ConfigTests: XCTestCase {
         let config = Config(env: [:])
         XCTAssertEqual(config.beeperURL, "http://localhost:23373")
         XCTAssertEqual(config.pollInterval, 5)
-        XCTAssertTrue(config.logDir.hasSuffix("beeper-message-sync/logs"))
+        XCTAssertTrue(config.logDir.hasSuffix("Beeper-Sync/logs"))
     }
 
     func testLoadFromEnv() {

@@ -3,8 +3,7 @@ import Foundation
 
 setbuf(stdout, nil)
 
-let args = CommandLine.arguments
-let mode = args.count > 1 ? args[1] : "watch"
+let (mode, filter) = parseArgs()
 
 // Handle modes that don't need a Beeper connection
 if mode == "grant-contacts" {
@@ -20,7 +19,7 @@ guard config.beeperToken != nil else {
     exit(1)
 }
 
-let engine = SyncEngine(config: config)
+let engine = SyncEngine(config: config, filter: filter)
 print("beeper-message-sync starting (mode: \(mode))")
 print("  Beeper API: \(config.beeperURL)")
 print("  Log dir: \(config.logDir)")
@@ -37,10 +36,16 @@ case "watch":
     print("Watching for new messages (poll interval: \(config.pollInterval)s)...")
     try await runWatch(engine: engine, interval: config.pollInterval)
 default:
-    print("Usage: beeper-message-sync [watch|backfill|grant-contacts]")
+    print("Usage: beeper-message-sync [watch|backfill|grant-contacts] [options]")
     print("  watch           - Poll for new messages (default). Runs backfill first if no state.")
     print("  backfill        - Full historical backfill, then exit.")
     print("  grant-contacts  - Request Contacts access (run interactively from Terminal).")
+    print("")
+    print("Options:")
+    print("  --network <names>  Comma-separated networks (e.g. \"imessage,signal\")")
+    print("  --chat <titles>    Comma-separated chat titles (substring match)")
+    print("  --since <date>     Only messages after this date (YYYY-MM-DD)")
+    print("  --until <date>     Only messages before this date (YYYY-MM-DD)")
     exit(1)
 }
 
@@ -50,11 +55,17 @@ func runBackfill(engine: SyncEngine) async throws {
     var cursor: String? = nil
     var chatIndex = 0
     var failCount = 0
+    var skipCount = 0
 
     repeat {
         let response = try await engine.client.listChats(cursor: cursor)
         for chat in response.items {
             chatIndex += 1
+            let resolved = engine.resolvedTitle(for: chat)
+            if !engine.filter.matchesChat(chat, resolvedTitle: resolved) {
+                skipCount += 1
+                continue
+            }
             print("  [\(chatIndex)] \(chat.network): \(chat.title)...", terminator: "")
             do {
                 let count = try await engine.backfillChat(chat)
@@ -71,7 +82,11 @@ func runBackfill(engine: SyncEngine) async throws {
         }
     } while true
 
-    print("Backfill complete. \(chatIndex) chats, \(failCount) failed.")
+    var summary = "Backfill complete. \(chatIndex) chats"
+    if skipCount > 0 { summary += ", \(skipCount) skipped" }
+    if failCount > 0 { summary += ", \(failCount) failed" }
+    summary += "."
+    print(summary)
 }
 
 func runWatch(engine: SyncEngine, interval: Int) async throws {
@@ -83,6 +98,69 @@ func runWatch(engine: SyncEngine, interval: Int) async throws {
         }
         try await Task.sleep(for: .seconds(interval))
     }
+}
+
+func parseArgs() -> (mode: String, filter: SyncFilter) {
+    let args = CommandLine.arguments
+    var mode = "watch"
+    var networks: [String]?
+    var chatTitles: [String]?
+    var since: Date?
+    var until: Date?
+
+    let dateFormatter = DateFormatter()
+    dateFormatter.dateFormat = "yyyy-MM-dd"
+    dateFormatter.timeZone = TimeZone(identifier: "UTC")
+
+    var i = 1
+    while i < args.count {
+        let arg = args[i]
+        switch arg {
+        case "--network":
+            i += 1
+            guard i < args.count else {
+                print("Error: --network requires a value")
+                exit(1)
+            }
+            networks = args[i].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        case "--chat":
+            i += 1
+            guard i < args.count else {
+                print("Error: --chat requires a value")
+                exit(1)
+            }
+            chatTitles = args[i].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        case "--since":
+            i += 1
+            guard i < args.count, let date = dateFormatter.date(from: args[i]) else {
+                print("Error: --since requires a date in YYYY-MM-DD format")
+                exit(1)
+            }
+            since = date
+        case "--until":
+            i += 1
+            guard i < args.count, let date = dateFormatter.date(from: args[i]) else {
+                print("Error: --until requires a date in YYYY-MM-DD format")
+                exit(1)
+            }
+            until = date
+        default:
+            if arg.hasPrefix("-") {
+                print("Unknown option: \(arg)")
+                exit(1)
+            }
+            mode = arg
+        }
+        i += 1
+    }
+
+    let filter = SyncFilter(
+        networks: networks,
+        chatTitles: chatTitles,
+        since: since,
+        until: until
+    )
+    return (mode, filter)
 }
 
 func grantContacts() async throws {

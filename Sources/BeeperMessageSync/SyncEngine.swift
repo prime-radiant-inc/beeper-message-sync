@@ -7,10 +7,12 @@ class SyncEngine {
     let attachmentFetcher: AttachmentFetcher
     let stateStore: StateStore
     let contactResolver: ContactResolver
+    let filter: SyncFilter
     let config: Config
 
-    init(config: Config, contactResolver: ContactResolver? = nil) {
+    init(config: Config, filter: SyncFilter = SyncFilter(), contactResolver: ContactResolver? = nil) {
         self.config = config
+        self.filter = filter
         self.client = BeeperClient(
             baseURL: config.beeperURL,
             token: config.beeperToken ?? ""
@@ -41,6 +43,12 @@ class SyncEngine {
         } while true
 
         for chat in allChats {
+            // Skip chats that don't match the filter
+            let resolved = resolvedTitle(for: chat)
+            if !filter.matchesChat(chat, resolvedTitle: resolved) {
+                continue
+            }
+
             let storedActivity = stateStore.lastActivity(for: chat.id)
 
             // Skip chats that haven't changed since last poll
@@ -97,8 +105,9 @@ class SyncEngine {
             return sortKey > last
         }
 
-        // Write messages
-        for message in filtered {
+        // Apply date filter and write messages
+        let dateFiltered = filtered.filter { filter.matchesTimestamp($0.timestamp) }
+        for message in dateFiltered {
             let date = extractDate(from: message.timestamp)
 
             // Download attachments
@@ -147,7 +156,8 @@ class SyncEngine {
             try logWriter.write(record: record)
         }
 
-        // Update state
+        // Update state — use the last message from the full filtered set
+        // (not dateFiltered) so we don't re-fetch messages we skipped
         if let lastMsg = filtered.last {
             stateStore.update(
                 chatID: chat.id,
@@ -186,6 +196,19 @@ class SyncEngine {
                 direction: cursor != nil ? "before" : nil
             )
             allMessages.append(contentsOf: response.items)
+
+            // Stop paginating if all messages in this page are before our since cutoff
+            if let since = filter.since,
+               !response.items.isEmpty,
+               response.items.allSatisfy({ !filter.matchesTimestamp($0.timestamp) }) {
+                // Check if they're all before (not after) the since date
+                let allBefore = response.items.allSatisfy {
+                    guard let date = ISO8601DateFormatter().date(from: $0.timestamp) else { return false }
+                    return date < since
+                }
+                if allBefore { break }
+            }
+
             if response.hasMore, let last = response.items.last?.sortKey {
                 cursor = last
             } else {
@@ -193,8 +216,10 @@ class SyncEngine {
             }
         } while true
 
-        // Sort chronologically and write
-        let sorted = allMessages.sorted { ($0.sortKey ?? "") < ($1.sortKey ?? "") }
+        // Sort chronologically, apply date filter, and write
+        let sorted = allMessages
+            .sorted { ($0.sortKey ?? "") < ($1.sortKey ?? "") }
+            .filter { filter.matchesTimestamp($0.timestamp) }
         for message in sorted {
             let date = extractDate(from: message.timestamp)
             var attachmentRecords: [AttachmentRecord] = []
