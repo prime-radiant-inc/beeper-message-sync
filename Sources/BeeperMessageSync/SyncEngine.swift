@@ -148,9 +148,6 @@ class SyncEngine {
 
             let record = MessageRecord(
                 id: message.id,
-                chatId: chat.id,
-                network: chat.network,
-                chatTitle: displayTitle,
                 senderId: message.senderID,
                 senderName: message.senderName,
                 timestamp: message.timestamp,
@@ -160,7 +157,7 @@ class SyncEngine {
                 attachments: attachmentRecords,
                 replyTo: message.linkedMessageID
             )
-            try logWriter.write(record: record)
+            try logWriter.write(record: record, toDir: chatDir)
         }
 
         // Update state — use the last message from the full filtered set
@@ -254,9 +251,6 @@ class SyncEngine {
 
             let record = MessageRecord(
                 id: message.id,
-                chatId: chat.id,
-                network: chat.network,
-                chatTitle: displayTitle,
                 senderId: message.senderID,
                 senderName: message.senderName,
                 timestamp: message.timestamp,
@@ -266,7 +260,7 @@ class SyncEngine {
                 attachments: attachmentRecords,
                 replyTo: message.linkedMessageID
             )
-            try logWriter.write(record: record)
+            try logWriter.write(record: record, toDir: chatDir)
         }
 
         // Update state to latest message
