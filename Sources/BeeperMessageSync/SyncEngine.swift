@@ -30,13 +30,20 @@ class SyncEngine {
     func pollOnce() async throws {
         var cursor: String? = nil
         var allChats: [Chat] = []
+        var seenIDs = Set<String>()
 
-        // Fetch all chats (paginate)
+        // Fetch all chats (paginate, dedup overlapping pages)
         repeat {
             let response = try await client.listChats(cursor: cursor)
-            allChats.append(contentsOf: response.items)
+            for chat in response.items {
+                if seenIDs.insert(chat.id).inserted {
+                    allChats.append(chat)
+                }
+            }
             if response.hasMore, let last = response.items.last {
-                cursor = last.lastActivity
+                let nextCursor = last.lastActivity
+                if nextCursor == cursor { break }
+                cursor = nextCursor
             } else {
                 break
             }
