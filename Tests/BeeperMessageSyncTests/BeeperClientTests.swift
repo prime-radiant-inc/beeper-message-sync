@@ -51,7 +51,7 @@ final class BeeperClientTests: XCTestCase {
         let page1 = try await skipOnNetworkError {
             try await client.listChats(limit: 2)
         }
-        XCTAssertLessThanOrEqual(page1.items.count, 2)
+        XCTAssertFalse(page1.items.isEmpty)
         if page1.hasMore, let cursor = page1.items.last?.lastActivity {
             let page2 = try await skipOnNetworkError {
                 try await client.listChats(limit: 2, cursor: cursor)

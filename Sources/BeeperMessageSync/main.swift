@@ -1,5 +1,7 @@
 import Foundation
 
+setbuf(stdout, nil)
+
 let args = CommandLine.arguments
 let mode = args.count > 1 ? args[1] : "watch"
 
@@ -64,15 +66,18 @@ func runWatch(engine: SyncEngine, interval: Int) async throws {
 func fetchAllChats(engine: SyncEngine) async throws -> [Chat] {
     var allChats: [Chat] = []
     var cursor: String? = nil
+    print("Fetching chat list...", terminator: "")
     repeat {
         let response = try await engine.client.listChats(cursor: cursor)
         allChats.append(contentsOf: response.items)
+        print(" \(allChats.count)", terminator: "")
         if response.hasMore, let last = response.items.last?.lastActivity {
             cursor = last
         } else {
             break
         }
     } while true
+    print(" done.")
     return allChats
 }
 
