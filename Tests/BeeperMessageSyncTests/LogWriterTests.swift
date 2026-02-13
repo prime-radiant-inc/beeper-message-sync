@@ -15,48 +15,29 @@ final class LogWriterTests: XCTestCase {
 
     func testWriteCreatesDirectoryStructure() throws {
         let writer = LogWriter(baseDir: tmpDir)
-        let record = MessageRecord(
-            id: "msg1",
-            chatId: "!test:beeper.com",
-            network: "Signal",
-            chatTitle: "Alice",
-            senderId: "user1",
-            senderName: "Alice Smith",
-            timestamp: "2026-02-12T15:30:00Z",
-            text: "Hello!",
-            isSender: false,
-            type: "text",
-            attachments: [],
-            replyTo: nil
-        )
-        try writer.write(record: record)
+        let record = makeRecord(id: "msg1", timestamp: "2026-02-12T15:30:00Z", text: "Hello!")
+        let dir = writer.chatDir(network: "Signal", chatTitle: "Alice")
+        try writer.write(record: record, toDir: dir)
 
         let expectedPath = "\(tmpDir!)/signal/Alice/2026-02-12.jsonl"
         XCTAssertTrue(FileManager.default.fileExists(atPath: expectedPath))
 
         let content = try String(contentsOfFile: expectedPath, encoding: .utf8)
         XCTAssertTrue(content.contains("\"id\":\"msg1\""))
+        XCTAssertFalse(content.contains("\"network\""))
+        XCTAssertFalse(content.contains("\"chatId\""))
+        XCTAssertFalse(content.contains("\"chatTitle\""))
         XCTAssertTrue(content.hasSuffix("\n"))
     }
 
     func testMultipleMessagesAppend() throws {
         let writer = LogWriter(baseDir: tmpDir)
+        let dir = writer.chatDir(network: "Signal", chatTitle: "Alice")
         for i in 1...3 {
-            let record = MessageRecord(
-                id: "msg\(i)",
-                chatId: "!test:beeper.com",
-                network: "Signal",
-                chatTitle: "Alice",
-                senderId: "user1",
-                senderName: "Alice",
-                timestamp: "2026-02-12T15:3\(i):00Z",
-                text: "Message \(i)",
-                isSender: false,
-                type: "text",
-                attachments: [],
-                replyTo: nil
+            let record = makeRecord(
+                id: "msg\(i)", timestamp: "2026-02-12T15:3\(i):00Z", text: "Message \(i)"
             )
-            try writer.write(record: record)
+            try writer.write(record: record, toDir: dir)
         }
 
         let path = "\(tmpDir!)/signal/Alice/2026-02-12.jsonl"
@@ -68,21 +49,9 @@ final class LogWriterTests: XCTestCase {
 
     func testNetworkNameNormalization() throws {
         let writer = LogWriter(baseDir: tmpDir)
-        let record = MessageRecord(
-            id: "msg1",
-            chatId: "!test:beeper.com",
-            network: "Twitter/X",
-            chatTitle: "Some User",
-            senderId: "user1",
-            senderName: "User",
-            timestamp: "2026-02-12T15:30:00Z",
-            text: "Tweet",
-            isSender: false,
-            type: "text",
-            attachments: [],
-            replyTo: nil
-        )
-        try writer.write(record: record)
+        let record = makeRecord(id: "msg1", timestamp: "2026-02-12T15:30:00Z", text: "Tweet")
+        let dir = writer.chatDir(network: "Twitter/X", chatTitle: "Some User")
+        try writer.write(record: record, toDir: dir)
 
         // Slash should be percent-encoded
         let networkDir = "\(tmpDir!)/twitter%2fx"
@@ -91,21 +60,9 @@ final class LogWriterTests: XCTestCase {
 
     func testChatTitleSanitization() throws {
         let writer = LogWriter(baseDir: tmpDir)
-        let record = MessageRecord(
-            id: "msg1",
-            chatId: "!test:beeper.com",
-            network: "WhatsApp",
-            chatTitle: "Family: Mom/Dad & Kids",
-            senderId: "user1",
-            senderName: "Mom",
-            timestamp: "2026-02-12T15:30:00Z",
-            text: "Hi",
-            isSender: false,
-            type: "text",
-            attachments: [],
-            replyTo: nil
-        )
-        try writer.write(record: record)
+        let record = makeRecord(id: "msg1", timestamp: "2026-02-12T15:30:00Z", text: "Hi")
+        let dir = writer.chatDir(network: "WhatsApp", chatTitle: "Family: Mom/Dad & Kids")
+        try writer.write(record: record, toDir: dir)
 
         // Slashes and colons should be percent-encoded, but the dir should exist
         let whatsappDir = "\(tmpDir!)/whatsapp"
@@ -125,14 +82,12 @@ final class LogWriterTests: XCTestCase {
         ]
 
         for (i, testCase) in cases.enumerated() {
-            let record = MessageRecord(
-                id: "msg\(i)", chatId: "c\(i)", network: "Test", chatTitle: testCase.title,
-                senderId: "u1", senderName: "X", timestamp: "2026-02-12T10:00:00Z",
-                text: "Hi", isSender: false, type: "text", attachments: [], replyTo: nil
+            let record = makeRecord(
+                id: "msg\(i)", timestamp: "2026-02-12T10:00:00Z", text: "Hi"
             )
-            try writer.write(record: record)
-
             let dir = writer.chatDir(network: "Test", chatTitle: testCase.title)
+            try writer.write(record: record, toDir: dir)
+
             let dirName = URL(fileURLWithPath: dir).lastPathComponent
             XCTAssertEqual(dirName, testCase.expected,
                 "Sanitizing '\(testCase.title)' should produce '\(testCase.expected)' but got '\(dirName)'")
@@ -141,22 +96,35 @@ final class LogWriterTests: XCTestCase {
 
     func testDifferentDatesGoToDifferentFiles() throws {
         let writer = LogWriter(baseDir: tmpDir)
-        let record1 = MessageRecord(
-            id: "msg1", chatId: "c1", network: "Signal", chatTitle: "Bob",
-            senderId: "u1", senderName: "Bob", timestamp: "2026-02-12T10:00:00Z",
-            text: "Day 1", isSender: false, type: "text", attachments: [], replyTo: nil
+        let dir = writer.chatDir(network: "Signal", chatTitle: "Bob")
+        let record1 = makeRecord(
+            id: "msg1", timestamp: "2026-02-12T10:00:00Z", text: "Day 1"
         )
-        let record2 = MessageRecord(
-            id: "msg2", chatId: "c1", network: "Signal", chatTitle: "Bob",
-            senderId: "u1", senderName: "Bob", timestamp: "2026-02-13T10:00:00Z",
-            text: "Day 2", isSender: false, type: "text", attachments: [], replyTo: nil
+        let record2 = makeRecord(
+            id: "msg2", timestamp: "2026-02-13T10:00:00Z", text: "Day 2"
         )
-        try writer.write(record: record1)
-        try writer.write(record: record2)
+        try writer.write(record: record1, toDir: dir)
+        try writer.write(record: record2, toDir: dir)
 
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: "\(tmpDir!)/signal/Bob/2026-02-12.jsonl"))
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: "\(tmpDir!)/signal/Bob/2026-02-13.jsonl"))
+    }
+
+    // MARK: - Helpers
+
+    private func makeRecord(id: String, timestamp: String, text: String) -> MessageRecord {
+        MessageRecord(
+            id: id,
+            senderId: "user1",
+            senderName: "Test User",
+            timestamp: timestamp,
+            text: text,
+            isSender: false,
+            type: "text",
+            attachments: [],
+            replyTo: nil
+        )
     }
 }

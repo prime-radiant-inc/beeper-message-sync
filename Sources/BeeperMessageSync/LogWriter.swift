@@ -4,9 +4,6 @@ import Foundation
 
 struct MessageRecord: Codable {
     let id: String
-    let chatId: String
-    let network: String
-    let chatTitle: String
     let senderId: String?
     let senderName: String?
     let timestamp: String
@@ -38,8 +35,7 @@ class LogWriter {
         self.encoder.outputFormatting = [.sortedKeys]
     }
 
-    func write(record: MessageRecord) throws {
-        let dirPath = chatDir(network: record.network, chatTitle: record.chatTitle)
+    func write(record: MessageRecord, toDir dirPath: String) throws {
         try fm.createDirectory(atPath: dirPath, withIntermediateDirectories: true)
 
         let date = extractDate(from: record.timestamp)
