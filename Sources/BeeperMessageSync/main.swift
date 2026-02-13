@@ -1,9 +1,16 @@
+import Contacts
 import Foundation
 
 setbuf(stdout, nil)
 
 let args = CommandLine.arguments
 let mode = args.count > 1 ? args[1] : "watch"
+
+// Handle modes that don't need a Beeper connection
+if mode == "grant-contacts" {
+    try await grantContacts()
+    exit(0)
+}
 
 let envPath = findEnvFile()
 let config = Config.load(from: envPath)
@@ -30,9 +37,10 @@ case "watch":
     print("Watching for new messages (poll interval: \(config.pollInterval)s)...")
     try await runWatch(engine: engine, interval: config.pollInterval)
 default:
-    print("Usage: beeper-message-sync [watch|backfill]")
-    print("  watch    - Poll for new messages (default). Runs backfill first if no state.")
-    print("  backfill - Full historical backfill, then exit.")
+    print("Usage: beeper-message-sync [watch|backfill|grant-contacts]")
+    print("  watch           - Poll for new messages (default). Runs backfill first if no state.")
+    print("  backfill        - Full historical backfill, then exit.")
+    print("  grant-contacts  - Request Contacts access (run interactively from Terminal).")
     exit(1)
 }
 
@@ -75,6 +83,21 @@ func runWatch(engine: SyncEngine, interval: Int) async throws {
         }
         try await Task.sleep(for: .seconds(interval))
     }
+}
+
+func grantContacts() async throws {
+    let status = CNContactStore.authorizationStatus(for: .contacts)
+    print("Current Contacts authorization: \(status.rawValue)")
+
+    if status == .authorized {
+        print("Contacts access already granted.")
+        return
+    }
+
+    print("Requesting Contacts access...")
+    let store = CNContactStore()
+    let granted = try await store.requestAccess(for: .contacts)
+    print(granted ? "Contacts access granted." : "Contacts access denied.")
 }
 
 func findEnvFile() -> String {
