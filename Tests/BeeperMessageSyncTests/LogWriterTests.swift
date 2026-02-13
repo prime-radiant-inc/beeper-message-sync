@@ -84,8 +84,8 @@ final class LogWriterTests: XCTestCase {
         )
         try writer.write(record: record)
 
-        // Slash should be sanitized
-        let networkDir = "\(tmpDir!)/twitter-x"
+        // Slash should be percent-encoded
+        let networkDir = "\(tmpDir!)/twitter%2fx"
         XCTAssertTrue(FileManager.default.fileExists(atPath: networkDir))
     }
 
@@ -107,23 +107,21 @@ final class LogWriterTests: XCTestCase {
         )
         try writer.write(record: record)
 
-        // Slashes and colons should be sanitized, but the dir should exist
+        // Slashes and colons should be percent-encoded, but the dir should exist
         let whatsappDir = "\(tmpDir!)/whatsapp"
         let contents = try FileManager.default.contentsOfDirectory(atPath: whatsappDir)
         XCTAssertEqual(contents.count, 1)
-        // The sanitized name should not contain / or :
-        XCTAssertFalse(contents[0].contains("/"))
-        XCTAssertFalse(contents[0].contains(":"))
+        XCTAssertEqual(contents[0], "Family%3A Mom%2FDad & Kids")
     }
 
     func testSanitizationHandlesEmojiAndSpecialChars() throws {
         let writer = LogWriter(baseDir: tmpDir)
 
         let cases: [(title: String, expected: String)] = [
-            ("Personal Agents 🦞🦀🛫😱", "Personal Agents"),
-            ("Intros <\u{2014}- start here", "Intros - start here"),
-            ("\u{65E5}\u{672C}\u{8A9E}", "_unnamed"),
-            ("Family: Mom/Dad & Kids", "Family- Mom-Dad & Kids"),
+            ("Personal Agents 🦞🦀🛫😱", "Personal Agents 🦞🦀🛫😱"),
+            ("Intros <\u{2014}- start here", "Intros %3C\u{2014}- start here"),
+            ("\u{65E5}\u{672C}\u{8A9E}", "\u{65E5}\u{672C}\u{8A9E}"),
+            ("Family: Mom/Dad & Kids", "Family%3A Mom%2FDad & Kids"),
         ]
 
         for (i, testCase) in cases.enumerated() {

@@ -70,17 +70,23 @@ class LogWriter {
     }
 
     private func sanitize(_ name: String) -> String {
-        let safe = CharacterSet(charactersIn:
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-.(),#&+'@!~")
-        var result = name.components(separatedBy: safe.inverted).joined(separator: "-")
-        // Collapse runs of dashes
-        while result.contains("--") {
-            result = result.replacingOccurrences(of: "--", with: "-")
+        // Percent-encode only characters illegal in filenames across macOS/Windows/Dropbox
+        let illegal: [Character: String] = [
+            "/": "%2F", "\\": "%5C", ":": "%3A", "*": "%2A",
+            "?": "%3F", "\"": "%22", "<": "%3C", ">": "%3E", "|": "%7C",
+        ]
+        var result = ""
+        for char in name {
+            if let encoded = illegal[char] {
+                result += encoded
+            } else if char.asciiValue != nil && char.asciiValue! < 32 {
+                // Encode control characters
+                result += String(format: "%%%02X", char.asciiValue!)
+            } else {
+                result.append(char)
+            }
         }
-        // Trim leading/trailing dashes and whitespace
-        result = result.trimmingCharacters(in: CharacterSet(charactersIn: "- "))
-        if result.isEmpty { result = "_unnamed" }
-        return result
+        return result.trimmingCharacters(in: .whitespaces)
     }
 
     private func extractDate(from timestamp: String) -> String {
