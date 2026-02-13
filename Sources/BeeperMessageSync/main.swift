@@ -39,17 +39,25 @@ default:
 // MARK: - Functions
 
 func runBackfill(engine: SyncEngine) async throws {
-    let chats = try await fetchAllChats(engine: engine)
-    print("Backfilling \(chats.count) chats...")
+    var cursor: String? = nil
+    var chatIndex = 0
 
-    for (i, chat) in chats.enumerated() {
-        print("  [\(i + 1)/\(chats.count)] \(chat.network): \(chat.title)...", terminator: "")
-        fflush(stdout)
-        let count = try await engine.backfillChat(chat)
-        print(" \(count) messages")
-    }
+    repeat {
+        let response = try await engine.client.listChats(cursor: cursor)
+        for chat in response.items {
+            chatIndex += 1
+            print("  [\(chatIndex)] \(chat.network): \(chat.title)...", terminator: "")
+            let count = try await engine.backfillChat(chat)
+            print(" \(count) messages")
+        }
+        if response.hasMore, let last = response.items.last?.lastActivity {
+            cursor = last
+        } else {
+            break
+        }
+    } while true
 
-    print("Backfill complete.")
+    print("Backfill complete. \(chatIndex) chats processed.")
 }
 
 func runWatch(engine: SyncEngine, interval: Int) async throws {
@@ -61,24 +69,6 @@ func runWatch(engine: SyncEngine, interval: Int) async throws {
         }
         try await Task.sleep(for: .seconds(interval))
     }
-}
-
-func fetchAllChats(engine: SyncEngine) async throws -> [Chat] {
-    var allChats: [Chat] = []
-    var cursor: String? = nil
-    print("Fetching chat list...", terminator: "")
-    repeat {
-        let response = try await engine.client.listChats(cursor: cursor)
-        allChats.append(contentsOf: response.items)
-        print(" \(allChats.count)", terminator: "")
-        if response.hasMore, let last = response.items.last?.lastActivity {
-            cursor = last
-        } else {
-            break
-        }
-    } while true
-    print(" done.")
-    return allChats
 }
 
 func findEnvFile() -> String {
