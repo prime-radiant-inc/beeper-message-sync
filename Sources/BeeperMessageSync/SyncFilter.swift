@@ -36,8 +36,10 @@ struct SyncFilter: Sendable {
         return true
     }
 
-    /// Check if a timestamp falls within the since/until bounds
+    /// Check if a timestamp falls within the since/until bounds.
+    /// Returns true when no date filter is set.
     func matchesTimestamp(_ timestamp: String) -> Bool {
+        guard since != nil || until != nil else { return true }
         guard let date = parseTimestamp(timestamp) else { return false }
         if let since, date < since { return false }
         if let until, date >= until { return false }
@@ -46,6 +48,9 @@ struct SyncFilter: Sendable {
 
     private func parseTimestamp(_ timestamp: String) -> Date? {
         let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: timestamp) { return date }
+        // Retry without fractional seconds
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: timestamp)
     }

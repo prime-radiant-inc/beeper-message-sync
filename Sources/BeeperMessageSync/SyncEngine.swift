@@ -205,15 +205,10 @@ class SyncEngine {
             allMessages.append(contentsOf: response.items)
 
             // Stop paginating if all messages in this page are before our since cutoff
-            if let since = filter.since,
+            if filter.since != nil,
                !response.items.isEmpty,
                response.items.allSatisfy({ !filter.matchesTimestamp($0.timestamp) }) {
-                // Check if they're all before (not after) the since date
-                let allBefore = response.items.allSatisfy {
-                    guard let date = ISO8601DateFormatter().date(from: $0.timestamp) else { return false }
-                    return date < since
-                }
-                if allBefore { break }
+                break
             }
 
             if response.hasMore, let last = response.items.last?.sortKey {

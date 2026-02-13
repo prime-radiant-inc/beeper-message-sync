@@ -61,6 +61,13 @@ final class SyncFilterTests: XCTestCase {
     func testNoDateFilterMatchesAll() {
         let filter = SyncFilter()
         XCTAssertTrue(filter.matchesTimestamp("2026-02-01T12:00:00Z"))
+        XCTAssertTrue(filter.matchesTimestamp("not-a-date"))
+    }
+
+    func testFractionalSecondsTimestamp() {
+        let filter = SyncFilter(since: makeDate("2026-02-05"))
+        XCTAssertTrue(filter.matchesTimestamp("2026-02-06T12:00:00.123Z"))
+        XCTAssertFalse(filter.matchesTimestamp("2026-02-04T23:59:59.999Z"))
     }
 
     func testSinceFilter() {
