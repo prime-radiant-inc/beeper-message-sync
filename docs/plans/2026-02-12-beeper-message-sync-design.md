@@ -9,11 +9,12 @@ A Swift command-line daemon that polls the Beeper Desktop API, detects new messa
 ```
 beeper-message-sync (Swift CLI)
   BeeperClient       — HTTP client wrapping the Beeper REST API
-  ChatPoller         — Polls /v1/chats, detects activity changes
-  MessageFetcher     — Fetches new messages per chat using cursor pagination
+  SyncEngine         — Orchestrates polling, message fetching, and writing
   AttachmentFetcher  — Downloads attachments via /v1/assets/download
   LogWriter          — Writes JSONL to the correct file path
+  MetadataWriter     — Writes per-chat metadata.json
   StateStore         — Tracks last-seen message sort keys/cursors per chat
+  ContactResolver    — Resolves phone numbers to names via macOS Contacts
 ```
 
 ## Polling Strategy
@@ -52,7 +53,7 @@ Only fetches message details for chats that have changed. Uses cursors to avoid 
       2026-02-12.jsonl
 ```
 
-Contact/group names come from the chat `title` field, sanitized for filesystem safety.
+Contact/group names come from the chat `title` field, sanitized for filesystem safety. For iMessage chats where the title is a phone number, `ContactResolver` resolves it to a contact name from macOS Contacts. Sanitization percent-encodes only illegal filesystem characters (`/\:*?"<>|` and control chars), preserving emoji, CJK, and accented characters.
 
 ## Chat Metadata File
 
@@ -63,11 +64,12 @@ Each chat directory gets a `metadata.json` updated when chat details change:
   "chatId": "!NCdz...",
   "accountId": "local-signal_ba_...",
   "network": "signal",
-  "title": "Alice",
+  "title": "+1 857-928-8332",
+  "resolvedTitle": "Alice Smith",
   "type": "single",
   "participants": [
-    {"id": "ba_...", "name": "Alice Smith", "phone": "+1..."},
-    {"id": "ba_...", "name": "Jesse Vincent", "isSelf": true}
+    {"id": "ba_...", "name": "Alice Smith", "phone": "+1...", "isSelf": false},
+    {"id": "ba_...", "name": "Jesse Vincent", "phone": null, "isSelf": true}
   ],
   "firstSeen": "2026-02-12T10:00:00Z",
   "lastUpdated": "2026-02-12T15:30:00Z"
@@ -118,6 +120,16 @@ On first run (no state file), full backfill: paginate backward through all messa
 - Cursor for forward pagination
 
 Enables clean resume after restarts without re-fetching.
+
+## Contact Resolution
+
+`ContactResolver` resolves iMessage phone-number chat titles to contact names using the macOS Contacts framework. On startup, it enumerates all contacts and builds a `[normalizedPhone: name]` cache, then uses exact match with a last-10-digit fallback for lookups.
+
+**Permissions:** Requires Contacts access granted in System Settings > Privacy & Security > Contacts. The binary embeds an `Info.plist` (via `__TEXT/__info_plist` linker section) with `NSContactsUsageDescription` so macOS can display the permission prompt.
+
+**Graceful fallback:** If Contacts access is denied or unavailable, the resolver returns empty and phone numbers are used as-is. The entire load is wrapped in a 10-second timeout to prevent daemon hangs when Contacts XPC calls block in launchd context.
+
+**Important:** Do NOT codesign with `com.apple.security.personal-information.addressbook` entitlement — this triggers App Sandbox restrictions that block Dropbox file I/O.
 
 ## Configuration
 
