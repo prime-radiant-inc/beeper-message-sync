@@ -116,6 +116,31 @@ final class LogWriterTests: XCTestCase {
         XCTAssertFalse(contents[0].contains(":"))
     }
 
+    func testSanitizationHandlesEmojiAndSpecialChars() throws {
+        let writer = LogWriter(baseDir: tmpDir)
+
+        let cases: [(title: String, expected: String)] = [
+            ("Personal Agents 🦞🦀🛫😱", "Personal Agents"),
+            ("Intros <\u{2014}- start here", "Intros - start here"),
+            ("\u{65E5}\u{672C}\u{8A9E}", "_unnamed"),
+            ("Family: Mom/Dad & Kids", "Family- Mom-Dad & Kids"),
+        ]
+
+        for (i, testCase) in cases.enumerated() {
+            let record = MessageRecord(
+                id: "msg\(i)", chatId: "c\(i)", network: "Test", chatTitle: testCase.title,
+                senderId: "u1", senderName: "X", timestamp: "2026-02-12T10:00:00Z",
+                text: "Hi", isSender: false, type: "text", attachments: [], replyTo: nil
+            )
+            try writer.write(record: record)
+
+            let dir = writer.chatDir(network: "Test", chatTitle: testCase.title)
+            let dirName = URL(fileURLWithPath: dir).lastPathComponent
+            XCTAssertEqual(dirName, testCase.expected,
+                "Sanitizing '\(testCase.title)' should produce '\(testCase.expected)' but got '\(dirName)'")
+        }
+    }
+
     func testDifferentDatesGoToDifferentFiles() throws {
         let writer = LogWriter(baseDir: tmpDir)
         let record1 = MessageRecord(

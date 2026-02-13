@@ -70,8 +70,17 @@ class LogWriter {
     }
 
     private func sanitize(_ name: String) -> String {
-        let illegal = CharacterSet(charactersIn: "/:\\")
-        return name.components(separatedBy: illegal).joined(separator: "-")
+        let safe = CharacterSet(charactersIn:
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-.(),#&+'@!~")
+        var result = name.components(separatedBy: safe.inverted).joined(separator: "-")
+        // Collapse runs of dashes
+        while result.contains("--") {
+            result = result.replacingOccurrences(of: "--", with: "-")
+        }
+        // Trim leading/trailing dashes and whitespace
+        result = result.trimmingCharacters(in: CharacterSet(charactersIn: "- "))
+        if result.isEmpty { result = "_unnamed" }
+        return result
     }
 
     private func extractDate(from timestamp: String) -> String {

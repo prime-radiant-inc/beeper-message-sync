@@ -96,19 +96,30 @@ class SyncEngine {
             // Download attachments
             var attachmentRecords: [AttachmentRecord] = []
             for attachment in message.attachments ?? [] {
-                let localPath = try await attachmentFetcher.fetch(
-                    attachment: attachment,
-                    network: chat.network,
-                    chatTitle: chat.title,
-                    date: date
-                )
-                attachmentRecords.append(AttachmentRecord(
-                    id: attachment.id,
-                    type: attachment.type,
-                    localPath: localPath,
-                    mimeType: attachment.mimeType,
-                    fileName: attachment.fileName
-                ))
+                do {
+                    let localPath = try await attachmentFetcher.fetch(
+                        attachment: attachment,
+                        network: chat.network,
+                        chatTitle: chat.title,
+                        date: date
+                    )
+                    attachmentRecords.append(AttachmentRecord(
+                        id: attachment.id,
+                        type: attachment.type,
+                        localPath: localPath,
+                        mimeType: attachment.mimeType,
+                        fileName: attachment.fileName
+                    ))
+                } catch {
+                    print("    WARNING: failed to download attachment \(attachment.id ?? "unknown"): \(error)")
+                    attachmentRecords.append(AttachmentRecord(
+                        id: attachment.id,
+                        type: attachment.type,
+                        localPath: nil,
+                        mimeType: attachment.mimeType,
+                        fileName: attachment.fileName
+                    ))
+                }
             }
 
             let record = MessageRecord(
@@ -178,19 +189,30 @@ class SyncEngine {
             let date = extractDate(from: message.timestamp)
             var attachmentRecords: [AttachmentRecord] = []
             for attachment in message.attachments ?? [] {
-                let localPath = try await attachmentFetcher.fetch(
-                    attachment: attachment,
-                    network: chat.network,
-                    chatTitle: chat.title,
-                    date: date
-                )
-                attachmentRecords.append(AttachmentRecord(
-                    id: attachment.id,
-                    type: attachment.type,
-                    localPath: localPath,
-                    mimeType: attachment.mimeType,
-                    fileName: attachment.fileName
-                ))
+                do {
+                    let localPath = try await attachmentFetcher.fetch(
+                        attachment: attachment,
+                        network: chat.network,
+                        chatTitle: chat.title,
+                        date: date
+                    )
+                    attachmentRecords.append(AttachmentRecord(
+                        id: attachment.id,
+                        type: attachment.type,
+                        localPath: localPath,
+                        mimeType: attachment.mimeType,
+                        fileName: attachment.fileName
+                    ))
+                } catch {
+                    print("    WARNING: failed to download attachment \(attachment.id ?? "unknown"): \(error)")
+                    attachmentRecords.append(AttachmentRecord(
+                        id: attachment.id,
+                        type: attachment.type,
+                        localPath: nil,
+                        mimeType: attachment.mimeType,
+                        fileName: attachment.fileName
+                    ))
+                }
             }
 
             let record = MessageRecord(
