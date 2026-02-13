@@ -41,14 +41,20 @@ default:
 func runBackfill(engine: SyncEngine) async throws {
     var cursor: String? = nil
     var chatIndex = 0
+    var failCount = 0
 
     repeat {
         let response = try await engine.client.listChats(cursor: cursor)
         for chat in response.items {
             chatIndex += 1
             print("  [\(chatIndex)] \(chat.network): \(chat.title)...", terminator: "")
-            let count = try await engine.backfillChat(chat)
-            print(" \(count) messages")
+            do {
+                let count = try await engine.backfillChat(chat)
+                print(" \(count) messages")
+            } catch {
+                print(" ERROR: \(error.localizedDescription)")
+                failCount += 1
+            }
         }
         if response.hasMore, let last = response.items.last?.lastActivity {
             cursor = last
@@ -57,7 +63,7 @@ func runBackfill(engine: SyncEngine) async throws {
         }
     } while true
 
-    print("Backfill complete. \(chatIndex) chats processed.")
+    print("Backfill complete. \(chatIndex) chats, \(failCount) failed.")
 }
 
 func runWatch(engine: SyncEngine, interval: Int) async throws {

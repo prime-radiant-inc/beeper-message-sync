@@ -49,7 +49,11 @@ class SyncEngine {
                 continue
             }
 
-            try await syncChat(chat)
+            do {
+                try await syncChat(chat)
+            } catch {
+                print("  Error syncing \(chat.title): \(error.localizedDescription)")
+            }
         }
 
         try stateStore.save()
