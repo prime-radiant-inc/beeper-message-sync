@@ -7,7 +7,15 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "beeper-message-sync",
-            path: "Sources/BeeperMessageSync"
+            path: "Sources/BeeperMessageSync",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/Resources/Info.plist",
+                ]),
+            ]
         ),
         .testTarget(
             name: "BeeperMessageSyncTests",

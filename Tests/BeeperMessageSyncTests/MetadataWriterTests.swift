@@ -20,6 +20,7 @@ final class MetadataWriterTests: XCTestCase {
             accountId: "local-signal_ba_abc",
             network: "Signal",
             title: "Alice",
+            resolvedTitle: nil,
             type: "single",
             participants: [
                 ParticipantInfo(id: "u1", name: "Alice", phone: "+1555", isSelf: false),
@@ -50,14 +51,14 @@ final class MetadataWriterTests: XCTestCase {
 
         let original = ChatMetadata(
             chatId: "!test:beeper.com", accountId: "acc1", network: "Signal",
-            title: "Alice", type: "single", participants: [],
+            title: "Alice", resolvedTitle: nil, type: "single", participants: [],
             firstSeen: "2026-02-12T10:00:00Z", lastUpdated: "2026-02-12T10:00:00Z"
         )
         try writer.write(metadata: original, toDir: dir)
 
         let updated = ChatMetadata(
             chatId: "!test:beeper.com", accountId: "acc1", network: "Signal",
-            title: "Alice (New Name)", type: "single", participants: [],
+            title: "Alice (New Name)", resolvedTitle: nil, type: "single", participants: [],
             firstSeen: "2026-02-12T10:00:00Z", lastUpdated: "2026-02-12T16:00:00Z"
         )
         try writer.write(metadata: updated, toDir: dir)

@@ -6,9 +6,10 @@ class SyncEngine {
     let metadataWriter: MetadataWriter
     let attachmentFetcher: AttachmentFetcher
     let stateStore: StateStore
+    let contactResolver: ContactResolver
     let config: Config
 
-    init(config: Config) {
+    init(config: Config, contactResolver: ContactResolver? = nil) {
         self.config = config
         self.client = BeeperClient(
             baseURL: config.beeperURL,
@@ -20,6 +21,7 @@ class SyncEngine {
             client: client, logWriter: logWriter
         )
         self.stateStore = StateStore(path: config.stateFile)
+        self.contactResolver = contactResolver ?? ContactResolver.load()
     }
 
     /// Run a single poll cycle: check all chats for new messages
@@ -55,12 +57,14 @@ class SyncEngine {
 
     /// Fetch and log new messages for a single chat
     func syncChat(_ chat: Chat) async throws {
+        let displayTitle = resolvedTitle(for: chat)
+
         // Update metadata
-        let chatDir = logWriter.chatDir(network: chat.network, chatTitle: chat.title)
+        let chatDir = logWriter.chatDir(network: chat.network, chatTitle: displayTitle)
         try FileManager.default.createDirectory(
             atPath: chatDir, withIntermediateDirectories: true
         )
-        let metadata = buildMetadata(from: chat)
+        let metadata = buildMetadata(from: chat, resolvedTitle: displayTitle)
         try metadataWriter.write(metadata: metadata, toDir: chatDir)
 
         // Fetch messages newer than our last seen sort key
@@ -100,7 +104,7 @@ class SyncEngine {
                     let localPath = try await attachmentFetcher.fetch(
                         attachment: attachment,
                         network: chat.network,
-                        chatTitle: chat.title,
+                        chatTitle: displayTitle,
                         date: date
                     )
                     attachmentRecords.append(AttachmentRecord(
@@ -126,7 +130,7 @@ class SyncEngine {
                 id: message.id,
                 chatId: chat.id,
                 network: chat.network,
-                chatTitle: chat.title,
+                chatTitle: displayTitle,
                 senderId: message.senderID,
                 senderName: message.senderName,
                 timestamp: message.timestamp,
@@ -158,11 +162,13 @@ class SyncEngine {
     /// Full backfill: paginate backward through all messages in a chat
     @discardableResult
     func backfillChat(_ chat: Chat) async throws -> Int {
-        let chatDir = logWriter.chatDir(network: chat.network, chatTitle: chat.title)
+        let displayTitle = resolvedTitle(for: chat)
+
+        let chatDir = logWriter.chatDir(network: chat.network, chatTitle: displayTitle)
         try FileManager.default.createDirectory(
             atPath: chatDir, withIntermediateDirectories: true
         )
-        let metadata = buildMetadata(from: chat)
+        let metadata = buildMetadata(from: chat, resolvedTitle: displayTitle)
         try metadataWriter.write(metadata: metadata, toDir: chatDir)
 
         var allMessages: [Message] = []
@@ -193,7 +199,7 @@ class SyncEngine {
                     let localPath = try await attachmentFetcher.fetch(
                         attachment: attachment,
                         network: chat.network,
-                        chatTitle: chat.title,
+                        chatTitle: displayTitle,
                         date: date
                     )
                     attachmentRecords.append(AttachmentRecord(
@@ -219,7 +225,7 @@ class SyncEngine {
                 id: message.id,
                 chatId: chat.id,
                 network: chat.network,
-                chatTitle: chat.title,
+                chatTitle: displayTitle,
                 senderId: message.senderID,
                 senderName: message.senderName,
                 timestamp: message.timestamp,
@@ -247,13 +253,42 @@ class SyncEngine {
 
     // MARK: - Helpers
 
-    private func buildMetadata(from chat: Chat) -> ChatMetadata {
+    /// Resolve chat title to contact name(s) for iMessage phone-number titles
+    func resolvedTitle(for chat: Chat) -> String {
+        let isIMessage = chat.network.lowercased().contains("imessage")
+        guard isIMessage else { return chat.title }
+
+        // Single chat: title is the phone number
+        if chat.type == "single" && ContactResolver.looksLikePhoneNumber(chat.title) {
+            if let name = contactResolver.resolve(chat.title) {
+                return name
+            }
+        }
+
+        // Group chat: title may be comma-separated phone numbers
+        if chat.type == "group" && ContactResolver.looksLikePhoneNumber(chat.title) {
+            let nonSelfParticipants = chat.participants.items.filter { !($0.isSelf ?? false) }
+            let resolvedNames = nonSelfParticipants.compactMap { user -> String? in
+                guard let phone = user.phoneNumber else { return user.fullName ?? user.username }
+                return contactResolver.resolve(phone) ?? user.fullName ?? user.username ?? phone
+            }
+            if !resolvedNames.isEmpty {
+                return resolvedNames.joined(separator: ", ")
+            }
+        }
+
+        return chat.title
+    }
+
+    private func buildMetadata(from chat: Chat, resolvedTitle: String) -> ChatMetadata {
         let now = ISO8601DateFormatter().string(from: Date())
+        let resolved = resolvedTitle != chat.title ? resolvedTitle : nil
         return ChatMetadata(
             chatId: chat.id,
             accountId: chat.accountID,
             network: chat.network,
             title: chat.title,
+            resolvedTitle: resolved,
             type: chat.type,
             participants: chat.participants.items.map { user in
                 ParticipantInfo(
