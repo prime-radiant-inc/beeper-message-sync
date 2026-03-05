@@ -78,13 +78,18 @@ class SyncEngine {
     func syncChat(_ chat: Chat) async throws {
         let displayTitle = resolvedTitle(for: chat)
 
-        // Update metadata
         let chatDir = logWriter.chatDir(network: chat.network, chatTitle: displayTitle)
         try FileManager.default.createDirectory(
             atPath: chatDir, withIntermediateDirectories: true
         )
-        let metadata = buildMetadata(from: chat, resolvedTitle: displayTitle)
-        try metadataWriter.write(metadata: metadata, toDir: chatDir)
+
+        // Metadata is supplementary — don't let write failures block message sync
+        do {
+            let metadata = buildMetadata(from: chat, resolvedTitle: displayTitle)
+            try metadataWriter.write(metadata: metadata, toDir: chatDir)
+        } catch {
+            print("  WARNING: failed to write metadata for \(displayTitle): \(error.localizedDescription)")
+        }
 
         // Fetch messages newer than our last seen sort key
         let lastSortKey = stateStore.lastSortKey(for: chat.id)
@@ -188,8 +193,14 @@ class SyncEngine {
         try FileManager.default.createDirectory(
             atPath: chatDir, withIntermediateDirectories: true
         )
-        let metadata = buildMetadata(from: chat, resolvedTitle: displayTitle)
-        try metadataWriter.write(metadata: metadata, toDir: chatDir)
+
+        // Metadata is supplementary — don't let write failures block message sync
+        do {
+            let metadata = buildMetadata(from: chat, resolvedTitle: displayTitle)
+            try metadataWriter.write(metadata: metadata, toDir: chatDir)
+        } catch {
+            print("  WARNING: failed to write metadata for \(displayTitle): \(error.localizedDescription)")
+        }
 
         var allMessages: [Message] = []
         var cursor: String? = nil
