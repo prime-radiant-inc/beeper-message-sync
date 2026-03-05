@@ -114,6 +114,7 @@ class LogWriter {
         let illegal: [Character: String] = [
             "/": "%2F", "\\": "%5C", ":": "%3A", "*": "%2A",
             "?": "%3F", "\"": "%22", "<": "%3C", ">": "%3E", "|": "%7C",
+            "&": "%26", "#": "%23",
         ]
         var result = ""
         for char in name {

@@ -105,7 +105,7 @@ final class LogWriterTests: XCTestCase {
         let whatsappDir = "\(tmpDir!)/whatsapp"
         let contents = try FileManager.default.contentsOfDirectory(atPath: whatsappDir)
         XCTAssertEqual(contents.count, 1)
-        XCTAssertEqual(contents[0], "Family%3A Mom%2FDad & Kids")
+        XCTAssertEqual(contents[0], "Family%3A Mom%2FDad %26 Kids")
     }
 
     func testSanitizationHandlesEmojiAndSpecialChars() throws {
@@ -115,7 +115,7 @@ final class LogWriterTests: XCTestCase {
             ("Personal Agents 🦞🦀🛫😱", "Personal Agents 🦞🦀🛫😱"),
             ("Intros <\u{2014}- start here", "Intros %3C\u{2014}- start here"),
             ("\u{65E5}\u{672C}\u{8A9E}", "\u{65E5}\u{672C}\u{8A9E}"),
-            ("Family: Mom/Dad & Kids", "Family%3A Mom%2FDad & Kids"),
+            ("Family: Mom/Dad & Kids", "Family%3A Mom%2FDad %26 Kids"),
         ]
 
         for (i, testCase) in cases.enumerated() {
@@ -129,6 +129,21 @@ final class LogWriterTests: XCTestCase {
             XCTAssertEqual(dirName, testCase.expected,
                 "Sanitizing '\(testCase.title)' should produce '\(testCase.expected)' but got '\(dirName)'")
         }
+    }
+
+    func testSanitizesAmpersandForDropbox() throws {
+        let writer = LogWriter(baseDir: tmpDir)
+        let record = makeRecord(id: "msg1", ts: "2026-02-12T15:30:00Z", text: "Hi")
+        let title = "+1 617-571-3000, +1 617-817-6446 & 3 others"
+        let dir = writer.chatDir(network: "iMessage", chatTitle: title)
+        try writer.write(record: record, toDir: dir)
+
+        let imessageDir = "\(tmpDir!)/imessage"
+        let contents = try FileManager.default.contentsOfDirectory(atPath: imessageDir)
+        XCTAssertEqual(contents.count, 1)
+        // & must be percent-encoded to avoid Dropbox file coordination issues
+        XCTAssertFalse(contents[0].contains("&"), "Ampersand should be encoded, got: \(contents[0])")
+        XCTAssertTrue(contents[0].contains("%26"), "Ampersand should be encoded as %26")
     }
 
     func testDifferentDatesGoToDifferentFiles() throws {
