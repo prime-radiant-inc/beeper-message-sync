@@ -10,8 +10,7 @@ final class ModelsTests: XCTestCase {
             "items": [
                 {
                     "id": "!test:beeper.com",
-                    "accountID": "local-signal_ba_abc",
-                    "network": "Signal",
+                    "accountID": "signal",
                     "title": "Alice",
                     "type": "single",
                     "participants": {
@@ -35,7 +34,7 @@ final class ModelsTests: XCTestCase {
         let result = try decoder.decode(ChatListResponse.self, from: json)
         XCTAssertEqual(result.items.count, 1)
         XCTAssertEqual(result.items[0].id, "!test:beeper.com")
-        XCTAssertEqual(result.items[0].network, "Signal")
+        XCTAssertEqual(result.items[0].network, "signal")
         XCTAssertEqual(result.items[0].title, "Alice")
         XCTAssertEqual(result.items[0].participants.items.count, 2)
         XCTAssertTrue(result.hasMore)

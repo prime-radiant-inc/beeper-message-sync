@@ -91,8 +91,8 @@ class LogWriter {
         if fm.fileExists(atPath: filePath) {
             let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: filePath))
             defer { try? handle.close() }
-            handle.seekToEndOfFile()
-            handle.write(line)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: line)
         } else {
             try line.write(to: URL(fileURLWithPath: filePath))
         }
