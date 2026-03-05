@@ -11,7 +11,6 @@ struct Chat: Codable {
     let id: String
     let localChatID: String?
     let accountID: String
-    let network: String
     let title: String
     let type: String
     let participants: Participants
@@ -21,6 +20,9 @@ struct Chat: Codable {
     let isMuted: Bool?
     let isPinned: Bool?
     let preview: Message?
+
+    /// The Beeper API uses accountID as the network identifier
+    var network: String { accountID }
 }
 
 struct Participants: Codable {

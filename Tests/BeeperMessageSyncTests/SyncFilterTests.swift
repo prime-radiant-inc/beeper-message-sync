@@ -105,8 +105,7 @@ final class SyncFilterTests: XCTestCase {
         Chat(
             id: "test-\(title)",
             localChatID: nil,
-            accountID: "account-1",
-            network: network,
+            accountID: network,
             title: title,
             type: "single",
             participants: Participants(items: [], hasMore: false, total: 0),
