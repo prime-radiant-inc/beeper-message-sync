@@ -675,20 +675,13 @@ git commit -m "Wire up Config.load() and setup command in main.swift"
 **Files:**
 - Create: `.github/workflows/release.yml`
 
-- [ ] **Step 1: Create HOMEBREW_TAP_TOKEN org secret**
+- [ ] **Step 1: Create the workflow file**
 
-The default `GITHUB_TOKEN` is scoped to the current repo and cannot push to
-`homebrew-tap`. Create a Personal Access Token (classic) with `repo` scope, or
-a fine-grained token with write access to `prime-radiant-inc/homebrew-tap`, and
-store it as an org secret:
-
-```bash
-# Create the token at https://github.com/settings/tokens/new
-# Then store it:
-echo -n "<TOKEN_VALUE>" | gh secret set HOMEBREW_TAP_TOKEN --org prime-radiant-inc --visibility all
-```
-
-- [ ] **Step 2: Create the workflow file**
+Note: The `prime-rad-deploybot` GitHub App (app_id: 2717706, installation on all
+repos, `contents:write` permission) will be used to push to homebrew-tap. The
+`APP_PRIVATE_KEY` org secret already exists. The workflow uses
+`actions/create-github-app-token@v1` to generate a short-lived token at runtime —
+no PAT needed.
 
 Create `.github/workflows/release.yml`:
 
@@ -825,9 +818,18 @@ jobs:
             ${{ env.ARTIFACTS_DIR }}/beeper-message-sync-darwin-x86_64.tar.gz
           generate_release_notes: true
 
+      - name: Generate Homebrew Tap Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: 2717706
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: prime-radiant-inc
+          repositories: homebrew-tap
+
       - name: Update Homebrew Tap
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
@@ -862,12 +864,12 @@ jobs:
         run: security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
 ```
 
-- [ ] **Step 3: Verify YAML syntax**
+- [ ] **Step 2: Verify YAML syntax**
 
 Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml'))" 2>&1`
 Expected: No output (valid YAML). If python3 yaml module not available, use: `ruby -ryaml -e "YAML.load_file('.github/workflows/release.yml')"`.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add .github/workflows/release.yml
