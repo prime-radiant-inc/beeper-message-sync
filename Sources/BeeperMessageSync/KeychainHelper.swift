@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 enum KeychainHelper {
     static let defaultService = "com.primeradiant.beeper-message-sync"
@@ -7,42 +6,68 @@ enum KeychainHelper {
 
     @discardableResult
     static func saveToken(_ token: String, service: String = defaultService) -> Bool {
-        guard let data = token.data(using: .utf8) else { return false }
-        deleteToken(service: service)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: data,
+        // Use `security` CLI because unsigned binaries can't call SecItemAdd
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "add-generic-password",
+            "-s", service,
+            "-a", account,
+            "-w", token,
+            "-U",  // update if exists
         ]
-        let status = SecItemAdd(query as CFDictionary, nil)
-        return status == errSecSuccess
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 
     static func loadToken(service: String = defaultService) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "find-generic-password",
+            "-s", service,
+            "-a", account,
+            "-w",  // print password only
         ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else {
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
             return nil
         }
-        return String(data: data, encoding: .utf8)
     }
 
     @discardableResult
     static func deleteToken(service: String = defaultService) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "delete-generic-password",
+            "-s", service,
+            "-a", account,
         ]
-        let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 }

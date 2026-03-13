@@ -1,3 +1,4 @@
+import Contacts
 import Foundation
 
 enum SetupCommand {
@@ -50,9 +51,13 @@ enum SetupCommand {
             return
         }
 
-        // Save token last (after config write succeeds)
-        KeychainHelper.saveToken(token)
-        print("Token saved to Keychain.")
+        // Save token to Keychain, unlocking if necessary
+        if !saveTokenToKeychain(token) {
+            return
+        }
+
+        // Step 5: Contacts access (optional, for iMessage name resolution)
+        offerContactsAccess()
 
         print("\nSetup complete! To start syncing:")
         print("  brew services start beeper-message-sync")
@@ -166,6 +171,86 @@ enum SetupCommand {
         task.resume()
         semaphore.wait()
         return success
+    }
+
+    /// Save token to Keychain, prompting to unlock if needed. Returns true on success.
+    private static func saveTokenToKeychain(_ token: String) -> Bool {
+        if KeychainHelper.saveToken(token) {
+            print("Token saved to Keychain.")
+            return true
+        }
+
+        // Keychain is locked — unlock it ourselves
+        print("\n  The macOS Keychain is locked (common in SSH sessions).")
+        let password = promptHidden("  macOS login password to unlock Keychain: ")
+        guard !password.isEmpty else {
+            print("  Cannot save token without unlocking the Keychain.")
+            return false
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "unlock-keychain",
+            "-p", password,
+            NSHomeDirectory() + "/Library/Keychains/login.keychain-db",
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            print("  Failed to unlock Keychain: \(error.localizedDescription)")
+            return false
+        }
+
+        guard process.terminationStatus == 0 else {
+            print("  Incorrect password — could not unlock the Keychain.")
+            return false
+        }
+
+        // Retry the save
+        if KeychainHelper.saveToken(token) {
+            print("  Keychain unlocked. Token saved to Keychain.")
+            return true
+        }
+
+        print("  Could not save token to Keychain even after unlocking.")
+        return false
+    }
+
+    /// Offer to grant Contacts access for iMessage phone number resolution.
+    private static func offerContactsAccess() {
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+        if status == .authorized {
+            return  // already granted
+        }
+
+        print("\nStep 5: Contacts access (optional)")
+        print("  Allows resolving iMessage phone numbers to contact names.")
+        print("  Note: this requires running from a GUI terminal (not SSH).")
+        let answer = prompt("  Grant Contacts access now? [Y/n]: ", default: "y")
+        guard answer.lowercased() != "n" else { return }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var granted = false
+        CNContactStore().requestAccess(for: .contacts) { result, _ in
+            granted = result
+            semaphore.signal()
+        }
+        let timeout = semaphore.wait(timeout: .now() + 30)
+
+        if timeout == .timedOut {
+            print("  Timed out waiting for Contacts prompt.")
+            print("  Run `beeper-message-sync grant-contacts` from Terminal.app later.")
+        } else if granted {
+            print("  Contacts access granted.")
+        } else {
+            print("  Contacts access denied or unavailable.")
+            print("  You can grant it later in System Settings > Privacy & Security > Contacts,")
+            print("  or run `beeper-message-sync grant-contacts` from Terminal.app.")
+        }
     }
 
     private static func createDirectoryIfNeeded(_ path: String) {

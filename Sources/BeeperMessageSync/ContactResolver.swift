@@ -32,7 +32,8 @@ struct ContactResolver: Sendable {
         let status = CNContactStore.authorizationStatus(for: .contacts)
 
         guard status == .authorized else {
-            print("  Contacts access not available (status: \(status.rawValue)) — grant access in System Settings > Privacy & Security > Contacts")
+            print("  Contacts access not granted — iMessage phone numbers won't be resolved to names.")
+            print("  To fix: run `beeper-message-sync grant-contacts` from a Terminal window.")
             return ContactResolver()
         }
 
