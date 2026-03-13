@@ -66,7 +66,7 @@ replace it.
 
 **Modified files:**
 - `Config.swift` — Replace `.env` loading with JSON config file + Keychain + env
-  var layering. Remove `load(from:)` and `findEnvFile()`.
+  var layering. Remove `load(from:)` and `init(env:)`.
 - `main.swift` — Add `setup` mode to the mode switch. Remove `findEnvFile()`.
 
 **New files:**
@@ -102,8 +102,8 @@ struct Config {
         if let data = FileManager.default.contents(atPath: configPath),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             if let v = json["beeperURL"] as? String { url = v }
-            if let v = json["logDir"] as? String { logDir = v.expandingTildeInPath }
-            if let v = json["stateFile"] as? String { stateFile = v.expandingTildeInPath }
+            if let v = json["logDir"] as? String { logDir = NSString(string: v).expandingTildeInPath }
+            if let v = json["stateFile"] as? String { stateFile = NSString(string: v).expandingTildeInPath }
             if let v = json["pollInterval"] as? Int { pollInterval = v }
         }
 
@@ -120,6 +120,13 @@ struct Config {
     }
 }
 ```
+
+### Keychain Entitlement Note
+
+CLI tools signed with hardened runtime can access the default Keychain without
+special entitlements on macOS. If Keychain access fails during the test release,
+an entitlements plist with `keychain-access-groups` may need to be added to the
+codesign step. Verify during Part 2 testing.
 
 ## Part 2: GitHub Actions Build/Sign/Notarize Pipeline
 
@@ -156,9 +163,12 @@ Runner: `macos-latest`
    lives on Apple's servers and macOS checks it on first launch. This is standard
    for CLI tools.
 
-7. **Package release artifacts** — Create tarballs:
-   - `beeper-message-sync-darwin-arm64.tar.gz`
-   - `beeper-message-sync-darwin-x86_64.tar.gz`
+7. **Package release artifacts** — Rename each binary to include its architecture
+   suffix, then create tarballs:
+   - Copy `.build/arm64-apple-macosx/release/beeper-message-sync` to
+     `beeper-message-sync-darwin-arm64`, tar into `beeper-message-sync-darwin-arm64.tar.gz`
+   - Copy `.build/x86_64-apple-macosx/release/beeper-message-sync` to
+     `beeper-message-sync-darwin-x86_64`, tar into `beeper-message-sync-darwin-x86_64.tar.gz`
 
 8. **Create GitHub Release** — `softprops/action-gh-release@v2` with both
    tarballs, auto-generated release notes from commits since last tag.
@@ -217,7 +227,7 @@ class BeeperMessageSync < Formula
     run [opt_bin/"beeper-message-sync", "watch"]
     keep_alive true
     log_path var/"log/beeper-message-sync.log"
-    error_log_path var/"log/beeper-message-sync.log"
+    error_log_path var/"log/beeper-message-sync-error.log"
   end
 
   def caveats
