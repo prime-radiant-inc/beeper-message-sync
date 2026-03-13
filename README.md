@@ -43,32 +43,50 @@ Default values are omitted to keep lines short: `type` is omitted when `TEXT`, `
 ## Requirements
 
 - macOS 14+
-- Swift 6.0+
-- [Beeper Desktop](https://www.beeper.com/download) running locally (exposes API on `localhost:23373`)
+- [Beeper Desktop](https://www.beeper.com/download) running locally with the API enabled
 
 ## Setup
 
-1. **Get your Beeper token** from Beeper Desktop's developer tools or API.
+### Install
 
-2. **Create a `.env` file** in the project root:
-   ```
-   BEEPER_TOKEN=your-token-here
-   ```
+```bash
+brew install prime-radiant-inc/tap/beeper-message-sync
+```
 
-3. **Build:**
-   ```bash
-   swift build -c release
-   ```
+### Configure
 
-4. **(Optional) Grant Contacts access** for iMessage phone number resolution:
-   ```bash
-   .build/release/beeper-message-sync grant-contacts
-   ```
+The setup wizard checks that Beeper Desktop is running, walks you through
+creating an API token, and saves everything to the Keychain and a config file:
+
+```bash
+beeper-message-sync setup
+```
+
+This will:
+1. Verify Beeper Desktop is running with the API enabled
+2. Guide you through creating a token in **Settings → Developers**
+3. Validate the token works
+4. Save the token to the macOS Keychain
+5. Write config to `~/.config/beeper-message-sync/config.json`
+
+### Start syncing
+
+```bash
+brew services start beeper-message-sync
+```
+
+### (Optional) Grant Contacts access
+
+For iMessage phone number → contact name resolution:
+
+```bash
+beeper-message-sync grant-contacts
+```
 
 ## Usage
 
 ```
-beeper-message-sync [watch|backfill|grant-contacts] [options]
+beeper-message-sync [watch|backfill|setup|grant-contacts] [options]
 ```
 
 ### Modes
@@ -77,6 +95,7 @@ beeper-message-sync [watch|backfill|grant-contacts] [options]
 |------|-------------|
 | `watch` | Poll for new messages continuously (default). Runs backfill first if no prior state. |
 | `backfill` | Fetch full history for all chats, then exit. |
+| `setup` | Interactive setup wizard (token, paths, config file). |
 | `grant-contacts` | Request macOS Contacts permission (run from Terminal). |
 
 ### Filtering
@@ -97,11 +116,12 @@ beeper-message-sync backfill --network whatsapp --chat "Off-topic" --since 2026-
 
 ### Configuration
 
-Environment variables (or `.env` file):
+Configuration is stored in `~/.config/beeper-message-sync/config.json` (created by `setup`).
+The API token is stored in the macOS Keychain. Environment variables override both:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BEEPER_TOKEN` | *(required)* | Beeper API token |
+| `BEEPER_TOKEN` | *(Keychain)* | Beeper API token |
 | `BEEPER_URL` | `http://localhost:23373` | Beeper API base URL |
 | `LOG_DIR` | `~/Dropbox/Beeper-Sync/logs` | Where to write message logs |
 | `STATE_FILE` | `~/Dropbox/Beeper-Sync/state.json` | Sync state (tracks last-seen messages) |
@@ -109,19 +129,13 @@ Environment variables (or `.env` file):
 
 ## Running as a daemon
 
-The included install script builds the binary and sets up a launchd agent:
-
 ```bash
-# Edit the plist to set your paths first
-vim com.primeradiant.beeper-message-sync.plist
-
-# Install and start
-scripts/install.sh
+brew services start beeper-message-sync
 ```
 
 To stop:
 ```bash
-launchctl bootout gui/$(id -u)/com.primeradiant.beeper-message-sync.plist
+brew services stop beeper-message-sync
 ```
 
 ## Tests
