@@ -11,11 +11,15 @@ if mode == "grant-contacts" {
     exit(0)
 }
 
-let envPath = findEnvFile()
-let config = Config.load(from: envPath)
+if mode == "setup" {
+    SetupCommand.run()
+    exit(0)
+}
+
+let config = Config.load()
 
 guard config.beeperToken != nil else {
-    print("Error: BEEPER_TOKEN not set. Add it to .env or set the environment variable.")
+    print("Error: BEEPER_TOKEN not set. Run `beeper-message-sync setup` to configure.")
     exit(1)
 }
 
@@ -36,9 +40,10 @@ case "watch":
     print("Watching for new messages (poll interval: \(config.pollInterval)s)...")
     try await runWatch(engine: engine, interval: config.pollInterval)
 default:
-    print("Usage: beeper-message-sync [watch|backfill|grant-contacts] [options]")
+    print("Usage: beeper-message-sync [watch|backfill|setup|grant-contacts] [options]")
     print("  watch           - Poll for new messages (default). Runs backfill first if no state.")
     print("  backfill        - Full historical backfill, then exit.")
+    print("  setup           - Interactive setup wizard (token, paths, config file).")
     print("  grant-contacts  - Request Contacts access (run interactively from Terminal).")
     print("")
     print("Options:")
@@ -181,12 +186,3 @@ func grantContacts() async throws {
     print(granted ? "Contacts access granted." : "Contacts access denied.")
 }
 
-func findEnvFile() -> String {
-    let cwd = FileManager.default.currentDirectoryPath
-    let cwdEnv = "\(cwd)/.env"
-    if FileManager.default.fileExists(atPath: cwdEnv) {
-        return cwdEnv
-    }
-    let execDir = (CommandLine.arguments[0] as NSString).deletingLastPathComponent
-    return "\(execDir)/.env"
-}

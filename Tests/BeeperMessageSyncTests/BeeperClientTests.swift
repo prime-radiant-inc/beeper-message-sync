@@ -5,11 +5,9 @@ final class BeeperClientTests: XCTestCase {
     var client: BeeperClient!
 
     override func setUp() async throws {
-        let config = Config.load(
-            from: "/Users/jesse/prime-radiant/beeper-message-sync/.env"
-        )
+        let config = Config.load(environment: ProcessInfo.processInfo.environment)
         guard let token = config.beeperToken else {
-            throw XCTSkip("No BEEPER_TOKEN in .env")
+            throw XCTSkip("No BEEPER_TOKEN configured")
         }
         client = BeeperClient(baseURL: config.beeperURL, token: token)
     }

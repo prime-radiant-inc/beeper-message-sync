@@ -8,11 +8,9 @@ final class SyncEngineTests: XCTestCase {
     override func setUp() async throws {
         tmpDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString).path
-        config = Config.load(
-            from: "/Users/jesse/prime-radiant/beeper-message-sync/.env"
-        )
+        config = Config.load(environment: ProcessInfo.processInfo.environment)
         guard config.beeperToken != nil else {
-            throw XCTSkip("No BEEPER_TOKEN in .env")
+            throw XCTSkip("No BEEPER_TOKEN configured")
         }
     }
 
@@ -23,12 +21,13 @@ final class SyncEngineTests: XCTestCase {
     func testSinglePollCycleCreatesFiles() async throws {
         let stateFile = "\(tmpDir!)/state.json"
         let engine = SyncEngine(
-            config: Config(env: [
-                "BEEPER_TOKEN": config.beeperToken!,
-                "BEEPER_URL": config.beeperURL,
-                "LOG_DIR": tmpDir!,
-                "STATE_FILE": stateFile,
-            ]),
+            config: Config(
+                beeperToken: config.beeperToken,
+                beeperURL: config.beeperURL,
+                logDir: tmpDir!,
+                pollInterval: config.pollInterval,
+                stateFile: stateFile
+            ),
             contactResolver: ContactResolver()
         )
 
@@ -48,12 +47,13 @@ final class SyncEngineTests: XCTestCase {
     func testBackfillFetchesAllMessages() async throws {
         let stateFile = "\(tmpDir!)/state.json"
         let engine = SyncEngine(
-            config: Config(env: [
-                "BEEPER_TOKEN": config.beeperToken!,
-                "BEEPER_URL": config.beeperURL,
-                "LOG_DIR": tmpDir!,
-                "STATE_FILE": stateFile,
-            ]),
+            config: Config(
+                beeperToken: config.beeperToken,
+                beeperURL: config.beeperURL,
+                logDir: tmpDir!,
+                pollInterval: config.pollInterval,
+                stateFile: stateFile
+            ),
             contactResolver: ContactResolver()
         )
 
