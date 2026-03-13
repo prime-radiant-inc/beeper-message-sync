@@ -1,0 +1,174 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      ARTIFACTS_DIR: ${{ github.workspace }}/dist
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build arm64
+        run: swift build -c release --arch arm64
+
+      - name: Build x86_64
+        run: swift build -c release --arch x86_64
+
+      - name: Setup Signing Keychain
+        env:
+          DEVELOPER_ID_APPLICATION_CERT_BASE64: ${{ secrets.DEVELOPER_ID_APPLICATION_CERT_BASE64 }}
+          DEVELOPER_ID_APPLICATION_CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/developer-id-application.p12"
+
+          echo "$DEVELOPER_ID_APPLICATION_CERT_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$RUNNER_TEMP" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$RUNNER_TEMP" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" \
+            -P "$DEVELOPER_ID_APPLICATION_CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$RUNNER_TEMP" "$KEYCHAIN_PATH"
+
+      - name: Codesign Binaries
+        env:
+          DEVELOPER_ID_APPLICATION_SIGNING_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION_SIGNING_IDENTITY"
+
+          codesign --force --options runtime --timestamp \
+            --sign "$SIGN_IDENTITY" \
+            .build/arm64-apple-macosx/release/beeper-message-sync
+
+          codesign --force --options runtime --timestamp \
+            --sign "$SIGN_IDENTITY" \
+            .build/x86_64-apple-macosx/release/beeper-message-sync
+
+          echo "Verifying signatures..."
+          codesign -dv --verbose=2 .build/arm64-apple-macosx/release/beeper-message-sync
+          codesign -dv --verbose=2 .build/x86_64-apple-macosx/release/beeper-message-sync
+
+      - name: Notarize Binaries
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          for ARCH in arm64 x86_64; do
+            BINARY=".build/${ARCH}-apple-macosx/release/beeper-message-sync"
+            ZIP="$RUNNER_TEMP/beeper-message-sync-${ARCH}-notarize.zip"
+
+            zip -j "$ZIP" "$BINARY"
+
+            echo "Submitting $ARCH binary for notarization..."
+            SUBMIT_OUTPUT="$RUNNER_TEMP/notary-${ARCH}.json"
+            xcrun notarytool submit "$ZIP" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait \
+              --output-format json > "$SUBMIT_OUTPUT"
+
+            STATUS=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('status',''))" "$SUBMIT_OUTPUT")
+            if [ "$STATUS" != "Accepted" ]; then
+              echo "Notarization failed for $ARCH (status: $STATUS)"
+              SUBMISSION_ID=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('id',''))" "$SUBMIT_OUTPUT")
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" || true
+              exit 1
+            fi
+
+            echo "$ARCH binary notarized successfully."
+          done
+
+      - name: Package Release Artifacts
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p "$ARTIFACTS_DIR"
+
+          for ARCH in arm64 x86_64; do
+            BINARY=".build/${ARCH}-apple-macosx/release/beeper-message-sync"
+            ARTIFACT_NAME="beeper-message-sync-darwin-${ARCH}"
+
+            cp "$BINARY" "$ARTIFACTS_DIR/$ARTIFACT_NAME"
+            cd "$ARTIFACTS_DIR"
+            tar czf "${ARTIFACT_NAME}.tar.gz" "$ARTIFACT_NAME"
+            rm "$ARTIFACT_NAME"
+            cd -
+          done
+
+          echo "Artifacts:"
+          ls -la "$ARTIFACTS_DIR"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.ARTIFACTS_DIR }}/beeper-message-sync-darwin-arm64.tar.gz
+            ${{ env.ARTIFACTS_DIR }}/beeper-message-sync-darwin-x86_64.tar.gz
+          generate_release_notes: true
+
+      - name: Generate Homebrew Tap Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: 2717706
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: prime-radiant-inc
+          repositories: homebrew-tap
+
+      - name: Update Homebrew Tap
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA_ARM64=$(shasum -a 256 "$ARTIFACTS_DIR/beeper-message-sync-darwin-arm64.tar.gz" | awk '{print $1}')
+          SHA_X86_64=$(shasum -a 256 "$ARTIFACTS_DIR/beeper-message-sync-darwin-x86_64.tar.gz" | awk '{print $1}')
+
+          cd "$RUNNER_TEMP"
+          gh repo clone prime-radiant-inc/homebrew-tap homebrew-tap
+          cd homebrew-tap
+          gh auth setup-git
+
+          ruby -e '
+            formula = File.read("Formula/beeper-message-sync.rb")
+            formula.sub!(/version ".*?"/, %Q{version "#{ARGV[0]}"})
+            shas = formula.scan(/sha256 ".*?"/)
+            formula.sub!(shas[0], %Q{sha256 "#{ARGV[1]}"}) if shas[0]
+            formula.sub!(shas[1], %Q{sha256 "#{ARGV[2]}"}) if shas[1]
+            File.write("Formula/beeper-message-sync.rb", formula)
+          ' "$VERSION" "$SHA_ARM64" "$SHA_X86_64"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "Formula/beeper-message-sync.rb"
+          git commit -m "Update beeper-message-sync to $VERSION"
+          git push
+
+      - name: Cleanup Keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
