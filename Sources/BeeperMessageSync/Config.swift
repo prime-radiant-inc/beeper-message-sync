@@ -7,33 +7,43 @@ struct Config {
     let pollInterval: Int
     let stateFile: String
 
-    init(env: [String: String]) {
-        self.beeperToken = env["BEEPER_TOKEN"]
-        self.beeperURL = env["BEEPER_URL"] ?? "http://localhost:23373"
-        self.logDir = env["LOG_DIR"]
-            ?? NSHomeDirectory() + "/Dropbox/Beeper-Sync/logs"
-        self.pollInterval = Int(env["POLL_INTERVAL"] ?? "") ?? 5
-        self.stateFile = env["STATE_FILE"]
-            ?? NSHomeDirectory() + "/Dropbox/Beeper-Sync/state.json"
-    }
+    static let defaultConfigPath = NSHomeDirectory()
+        + "/.config/beeper-message-sync/config.json"
 
-    static func load(from dotEnvPath: String) -> Config {
-        var env: [String: String] = [:]
-        if let contents = try? String(contentsOfFile: dotEnvPath, encoding: .utf8) {
-            for line in contents.components(separatedBy: .newlines) {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
-                let parts = trimmed.split(separator: "=", maxSplits: 1)
-                guard parts.count == 2 else { continue }
-                let key = String(parts[0]).trimmingCharacters(in: .whitespaces)
-                let value = String(parts[1]).trimmingCharacters(in: .whitespaces)
-                env[key] = value
+    static func load(
+        configPath: String = defaultConfigPath,
+        keychainService: String = KeychainHelper.defaultService,
+        environment: [String: String]? = nil
+    ) -> Config {
+        // 1. Start with defaults + Keychain token
+        var token: String? = KeychainHelper.loadToken(service: keychainService)
+        var url = "http://localhost:23373"
+        var logDir = NSHomeDirectory() + "/Dropbox/Beeper-Sync/logs"
+        var pollInterval = 5
+        var stateFile = NSHomeDirectory() + "/Dropbox/Beeper-Sync/state.json"
+
+        // 2. Override from config file
+        if let data = FileManager.default.contents(atPath: configPath),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let v = json["beeperURL"] as? String { url = v }
+            if let v = json["logDir"] as? String {
+                logDir = NSString(string: v).expandingTildeInPath
             }
+            if let v = json["stateFile"] as? String {
+                stateFile = NSString(string: v).expandingTildeInPath
+            }
+            if let v = json["pollInterval"] as? Int { pollInterval = v }
         }
-        // Environment variables override .env file
-        for (key, value) in ProcessInfo.processInfo.environment {
-            env[key] = value
-        }
-        return Config(env: env)
+
+        // 3. Override from environment
+        let env = environment ?? ProcessInfo.processInfo.environment
+        if let v = env["BEEPER_TOKEN"] { token = v }
+        if let v = env["BEEPER_URL"] { url = v }
+        if let v = env["LOG_DIR"] { logDir = v }
+        if let v = env["POLL_INTERVAL"], let i = Int(v) { pollInterval = i }
+        if let v = env["STATE_FILE"] { stateFile = v }
+
+        return Config(beeperToken: token, beeperURL: url, logDir: logDir,
+                      pollInterval: pollInterval, stateFile: stateFile)
     }
 }
