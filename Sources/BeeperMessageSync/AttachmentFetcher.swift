@@ -11,18 +11,24 @@ struct AttachmentFetcher {
         chatTitle: String,
         date: String
     ) async throws -> String? {
-        guard let assetID = attachment.id else { return nil }
+        // If the attachment already has a local file URL, use it directly
+        // (common for iMessage attachments stored in ~/Library/Messages/)
+        let sourcePath: String
+        if let src = attachment.srcURL, src.hasPrefix("file://") {
+            sourcePath = Self.parseFileURL(src)
+        } else {
+            guard let assetID = attachment.id else { return nil }
 
-        // Ask Beeper to download the asset and give us a local file path
-        let response = try await client.downloadAsset(url: assetID)
-        guard let srcURL = response.srcURL else {
-            if let error = response.error {
-                print("  Warning: attachment download failed: \(error)")
+            // Ask Beeper to download the asset and give us a local file path
+            let response = try await client.downloadAsset(url: assetID)
+            guard let srcURL = response.srcURL else {
+                if let error = response.error {
+                    print("  Warning: attachment download failed: \(error)")
+                }
+                return nil
             }
-            return nil
+            sourcePath = Self.parseFileURL(srcURL)
         }
-
-        let sourcePath = Self.parseFileURL(srcURL)
         let destDir = logWriter.attachmentDir(
             network: network, chatTitle: chatTitle, date: date
         )
