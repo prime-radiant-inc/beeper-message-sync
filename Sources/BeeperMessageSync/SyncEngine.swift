@@ -315,15 +315,20 @@ class SyncEngine {
 
         // Group chat: resolve participant phone numbers to names.
         // Skip if the group already has a meaningful name (not just phone numbers).
+        // Title formats vary: "+1 617-571-3000, +1 617-817-6446 & 2 others"
+        // but participant phones are "+16175713000". Compare by normalizing
+        // the title's digit sequences against participant phone suffixes.
         if chat.type == "group" {
             let nonSelfParticipants = chat.participants.items.filter { !($0.isSelf ?? false) }
             let hasPhoneParticipants = nonSelfParticipants.contains { $0.phoneNumber != nil }
-            let titleIsPhoneNumbers = nonSelfParticipants.contains {
+            let titleDigits = chat.title.filter(\.isNumber)
+            let titleIsPhoneNumbers = hasPhoneParticipants && nonSelfParticipants.contains {
                 guard let phone = $0.phoneNumber else { return false }
-                return chat.title.contains(phone) ||
-                    chat.title.contains(ContactResolver.normalizePhoneNumber(phone))
+                let phoneDigits = phone.filter(\.isNumber)
+                guard phoneDigits.count >= 7 else { return false }
+                return titleDigits.contains(phoneDigits)
             }
-            if hasPhoneParticipants && titleIsPhoneNumbers {
+            if titleIsPhoneNumbers {
                 let resolvedNames = nonSelfParticipants.compactMap { user -> String? in
                     guard let phone = user.phoneNumber else { return user.fullName ?? user.username }
                     return contactResolver.resolve(phone) ?? user.fullName ?? user.username ?? phone
