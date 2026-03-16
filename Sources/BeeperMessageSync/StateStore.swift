@@ -45,6 +45,8 @@ class StateStore {
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try data.write(to: url)
+        // Use FileManager.createFile instead of Data.write(to:) to avoid
+        // NSFileCoordinator, which deadlocks with Dropbox's File Provider
+        FileManager.default.createFile(atPath: path, contents: data)
     }
 }

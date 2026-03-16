@@ -32,15 +32,6 @@ struct MetadataWriter {
     }
 
     func write(metadata: ChatMetadata, toDir dir: String) throws {
-        do {
-            try writeOnce(metadata: metadata, toDir: dir)
-        } catch {
-            // Single retry — transient Dropbox file locks resolve quickly
-            try writeOnce(metadata: metadata, toDir: dir)
-        }
-    }
-
-    private func writeOnce(metadata: ChatMetadata, toDir dir: String) throws {
         let path = "\(dir)/metadata.json"
 
         // Preserve firstSeen from existing file if it exists
@@ -61,6 +52,8 @@ struct MetadataWriter {
         }
 
         let data = try encoder.encode(finalMetadata)
-        try data.write(to: URL(fileURLWithPath: path))
+        // Use FileManager.createFile instead of Data.write(to:) to avoid
+        // NSFileCoordinator, which deadlocks with Dropbox's File Provider (EDEADLK)
+        FileManager.default.createFile(atPath: path, contents: data)
     }
 }

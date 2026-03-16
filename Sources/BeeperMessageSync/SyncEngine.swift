@@ -88,7 +88,7 @@ class SyncEngine {
             let metadata = buildMetadata(from: chat, resolvedTitle: displayTitle)
             try metadataWriter.write(metadata: metadata, toDir: chatDir)
         } catch {
-            print("  WARNING: failed to write metadata for \(displayTitle): \(error.localizedDescription)")
+            print("  WARNING: failed to write metadata for \(displayTitle): \(error)")
         }
 
         // Fetch messages newer than our last seen sort key by paginating
@@ -211,7 +211,7 @@ class SyncEngine {
             let metadata = buildMetadata(from: chat, resolvedTitle: displayTitle)
             try metadataWriter.write(metadata: metadata, toDir: chatDir)
         } catch {
-            print("  WARNING: failed to write metadata for \(displayTitle): \(error.localizedDescription)")
+            print("  WARNING: failed to write metadata for \(displayTitle): \(error)")
         }
 
         var allMessages: [Message] = []
