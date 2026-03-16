@@ -67,7 +67,7 @@ class SyncEngine {
             do {
                 try await syncChat(chat)
             } catch {
-                print("  Error syncing \(chat.title): \(error.localizedDescription)")
+                print("  Error syncing \(chat.title): \(error) [\(error as NSError)]")
             }
         }
 
@@ -79,9 +79,7 @@ class SyncEngine {
         let displayTitle = resolvedTitle(for: chat)
 
         let chatDir = logWriter.chatDir(network: chat.network, chatTitle: displayTitle)
-        try FileManager.default.createDirectory(
-            atPath: chatDir, withIntermediateDirectories: true
-        )
+        try createDirectoryWithPOSIX(atPath: chatDir)
 
         // Metadata is supplementary — don't let write failures block message sync
         do {
@@ -202,9 +200,7 @@ class SyncEngine {
         let displayTitle = resolvedTitle(for: chat)
 
         let chatDir = logWriter.chatDir(network: chat.network, chatTitle: displayTitle)
-        try FileManager.default.createDirectory(
-            atPath: chatDir, withIntermediateDirectories: true
-        )
+        try createDirectoryWithPOSIX(atPath: chatDir)
 
         // Metadata is supplementary — don't let write failures block message sync
         do {

@@ -41,12 +41,7 @@ class StateStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(chats)
         let url = URL(fileURLWithPath: path)
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        // Use FileManager.createFile instead of Data.write(to:) to avoid
-        // NSFileCoordinator, which deadlocks with Dropbox's File Provider
-        FileManager.default.createFile(atPath: path, contents: data)
+        try createDirectoryWithPOSIX(atPath: url.deletingLastPathComponent().path)
+        try writeDataToPath(data, path: path)
     }
 }

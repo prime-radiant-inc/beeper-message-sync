@@ -62,7 +62,7 @@ struct AttachmentFetcher {
         fileName: String
     ) throws -> String {
         let fm = FileManager.default
-        try fm.createDirectory(atPath: destDir, withIntermediateDirectories: true)
+        try createDirectoryWithPOSIX(atPath: destDir)
 
         var destPath = "\(destDir)/\(fileName)"
         if fm.fileExists(atPath: destPath) {
