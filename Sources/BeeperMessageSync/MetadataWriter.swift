@@ -32,6 +32,15 @@ struct MetadataWriter {
     }
 
     func write(metadata: ChatMetadata, toDir dir: String) throws {
+        do {
+            try writeOnce(metadata: metadata, toDir: dir)
+        } catch {
+            // Single retry — transient Dropbox file locks resolve quickly
+            try writeOnce(metadata: metadata, toDir: dir)
+        }
+    }
+
+    private func writeOnce(metadata: ChatMetadata, toDir dir: String) throws {
         let path = "\(dir)/metadata.json"
 
         // Preserve firstSeen from existing file if it exists
