@@ -91,34 +91,46 @@ class SyncEngine {
             print("  WARNING: failed to write metadata for \(displayTitle): \(error.localizedDescription)")
         }
 
-        // Fetch messages newer than our last seen sort key
+        // Fetch messages newer than our last seen sort key by paginating
+        // backward from the newest message until we reach lastSortKey.
+        // The Beeper API always returns results in descending order,
+        // so we use direction=before for pagination (not direction=after,
+        // which causes an overlapping-page infinite loop).
         let lastSortKey = stateStore.lastSortKey(for: chat.id)
         var newMessages: [Message] = []
-        var msgCursor: String? = lastSortKey
-        let direction: String? = lastSortKey != nil ? "after" : nil
+        var msgCursor: String? = nil
+        var reachedStoredState = false
 
         repeat {
             let response = try await client.listMessages(
                 chatID: chat.id,
                 cursor: msgCursor,
-                direction: direction
+                direction: msgCursor != nil ? "before" : nil
             )
-            newMessages.append(contentsOf: response.items)
-            if response.hasMore, let last = response.items.last?.sortKey {
+
+            for message in response.items {
+                if let sortKey = message.sortKey, let last = lastSortKey, sortKey <= last {
+                    reachedStoredState = true
+                    break
+                }
+                newMessages.append(message)
+            }
+
+            if reachedStoredState || !response.hasMore {
+                break
+            }
+            if let last = response.items.last?.sortKey {
                 msgCursor = last
             } else {
                 break
             }
         } while true
 
-        // Filter out already-seen messages and sort by timestamp
-        let filtered = newMessages.filter { msg in
-            guard let sortKey = msg.sortKey, let last = lastSortKey else { return true }
-            return sortKey > last
-        }
+        // Sort chronologically (API returns newest-first)
+        let sorted = newMessages.sorted { ($0.sortKey ?? "") < ($1.sortKey ?? "") }
 
         // Apply date filter and write messages
-        let dateFiltered = filtered.filter { filter.matchesTimestamp($0.timestamp) }
+        let dateFiltered = sorted.filter { filter.matchesTimestamp($0.timestamp) }
         for message in dateFiltered {
             let date = extractDate(from: message.timestamp)
 
@@ -167,9 +179,9 @@ class SyncEngine {
             try logWriter.write(record: record, toDir: chatDir)
         }
 
-        // Update state — use the last message from the full filtered set
+        // Update state — use the last message from the full sorted set
         // (not dateFiltered) so we don't re-fetch messages we skipped
-        if let lastMsg = filtered.last {
+        if let lastMsg = sorted.last {
             stateStore.update(
                 chatID: chat.id,
                 lastSortKey: lastMsg.sortKey,
