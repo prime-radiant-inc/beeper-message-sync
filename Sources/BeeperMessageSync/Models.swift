@@ -5,6 +5,8 @@ import Foundation
 struct ChatListResponse: Codable {
     let items: [Chat]
     let hasMore: Bool
+    let oldestCursor: String?
+    let newestCursor: String?
 }
 
 struct Chat: Codable {
@@ -47,6 +49,8 @@ struct User: Codable {
 struct MessageListResponse: Codable {
     let items: [Message]
     let hasMore: Bool
+    let oldestCursor: String?
+    let newestCursor: String?
 }
 
 struct Message: Codable {

@@ -40,9 +40,7 @@ class SyncEngine {
                     allChats.append(chat)
                 }
             }
-            if response.hasMore, let last = response.items.last {
-                let nextCursor = last.lastActivity
-                if nextCursor == cursor { break }
+            if response.hasMore, let nextCursor = response.oldestCursor {
                 cursor = nextCursor
             } else {
                 break

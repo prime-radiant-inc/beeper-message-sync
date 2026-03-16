@@ -82,9 +82,8 @@ func runBackfill(engine: SyncEngine) async throws {
                 failCount += 1
             }
         }
-        if response.hasMore, let last = response.items.last?.lastActivity {
-            if last == cursor { break }
-            cursor = last
+        if response.hasMore, let nextCursor = response.oldestCursor {
+            cursor = nextCursor
         } else {
             break
         }
