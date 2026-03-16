@@ -16,6 +16,13 @@ struct AttachmentFetcher {
         let sourcePath: String
         if let src = attachment.srcURL, src.hasPrefix("file://") {
             sourcePath = Self.parseFileURL(src)
+        } else if let src = attachment.srcURL, src.hasPrefix("asset://") {
+            // asset:// URLs contain hex-encoded local file paths after the account ID
+            if let path = Self.parseAssetURL(src) {
+                sourcePath = path
+            } else {
+                return nil
+            }
         } else {
             guard let assetID = attachment.id else { return nil }
 
@@ -45,6 +52,24 @@ struct AttachmentFetcher {
             return String(destPath.dropFirst(chatDir.count + 1))
         }
         return destPath
+    }
+
+    /// Parse an asset:// URL with hex-encoded path to a filesystem path
+    /// Format: asset://<accountID>/<hex-encoded-path>
+    static func parseAssetURL(_ urlString: String) -> String? {
+        guard urlString.hasPrefix("asset://") else { return nil }
+        let stripped = String(urlString.dropFirst("asset://".count))
+        // Path is after the first /
+        guard let slashIndex = stripped.firstIndex(of: "/") else { return nil }
+        let hexPath = String(stripped[stripped.index(after: slashIndex)...])
+        // Decode hex to bytes to string
+        var bytes = [UInt8]()
+        var chars = hexPath.makeIterator()
+        while let hi = chars.next(), let lo = chars.next() {
+            guard let byte = UInt8(String([hi, lo]), radix: 16) else { return nil }
+            bytes.append(byte)
+        }
+        return String(bytes: bytes, encoding: .utf8)
     }
 
     /// Parse a file:// URL to a filesystem path
