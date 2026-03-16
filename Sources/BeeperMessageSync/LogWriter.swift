@@ -101,7 +101,9 @@ class LogWriter {
             try handle.seekToEnd()
             try handle.write(contentsOf: line)
         } else {
-            try line.write(to: URL(fileURLWithPath: filePath))
+            // Use FileManager.createFile instead of Data.write(to:) to avoid
+            // NSFileCoordinator, which deadlocks with Dropbox's File Provider
+            fm.createFile(atPath: filePath, contents: line)
         }
     }
 
