@@ -313,15 +313,24 @@ class SyncEngine {
             }
         }
 
-        // Group chat: title may be comma-separated phone numbers
-        if chat.type == "group" && ContactResolver.looksLikePhoneNumber(chat.title) {
+        // Group chat: resolve participant phone numbers to names.
+        // Skip if the group already has a meaningful name (not just phone numbers).
+        if chat.type == "group" {
             let nonSelfParticipants = chat.participants.items.filter { !($0.isSelf ?? false) }
-            let resolvedNames = nonSelfParticipants.compactMap { user -> String? in
-                guard let phone = user.phoneNumber else { return user.fullName ?? user.username }
-                return contactResolver.resolve(phone) ?? user.fullName ?? user.username ?? phone
+            let hasPhoneParticipants = nonSelfParticipants.contains { $0.phoneNumber != nil }
+            let titleIsPhoneNumbers = nonSelfParticipants.contains {
+                guard let phone = $0.phoneNumber else { return false }
+                return chat.title.contains(phone) ||
+                    chat.title.contains(ContactResolver.normalizePhoneNumber(phone))
             }
-            if !resolvedNames.isEmpty {
-                return resolvedNames.joined(separator: ", ")
+            if hasPhoneParticipants && titleIsPhoneNumbers {
+                let resolvedNames = nonSelfParticipants.compactMap { user -> String? in
+                    guard let phone = user.phoneNumber else { return user.fullName ?? user.username }
+                    return contactResolver.resolve(phone) ?? user.fullName ?? user.username ?? phone
+                }
+                if !resolvedNames.isEmpty {
+                    return resolvedNames.joined(separator: ", ")
+                }
             }
         }
 
