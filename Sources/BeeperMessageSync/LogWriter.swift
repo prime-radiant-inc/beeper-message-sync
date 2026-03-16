@@ -81,7 +81,7 @@ class LogWriter {
     }
 
     func write(record: MessageRecord, toDir dirPath: String) throws {
-        try fm.createDirectory(atPath: dirPath, withIntermediateDirectories: true)
+        try createDirectoryWithPOSIX(atPath: dirPath)
 
         let date = extractDate(from: record.ts)
         let filePath = "\(dirPath)/\(date).jsonl"
@@ -95,16 +95,9 @@ class LogWriter {
         let data = try encoder.encode(record)
         let line = data + Data("\n".utf8)
 
-        if fm.fileExists(atPath: filePath) {
-            let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: filePath))
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: line)
-        } else {
-            // Use FileManager.createFile instead of Data.write(to:) to avoid
-            // NSFileCoordinator, which deadlocks with Dropbox's File Provider
-            fm.createFile(atPath: filePath, contents: line)
-        }
+        // Use POSIX APIs for all file I/O to avoid Foundation's
+        // NSFileCoordinator which deadlocks with Dropbox's File Provider
+        try appendDataToPath(line, path: filePath)
     }
 
     private func loadExistingIDs(from filePath: String) -> Set<String> {

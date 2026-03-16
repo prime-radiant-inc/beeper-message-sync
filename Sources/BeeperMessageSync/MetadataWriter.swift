@@ -52,8 +52,6 @@ struct MetadataWriter {
         }
 
         let data = try encoder.encode(finalMetadata)
-        // Use FileManager.createFile instead of Data.write(to:) to avoid
-        // NSFileCoordinator, which deadlocks with Dropbox's File Provider (EDEADLK)
-        FileManager.default.createFile(atPath: path, contents: data)
+        try writeDataToPath(data, path: path)
     }
 }
