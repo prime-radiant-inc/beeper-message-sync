@@ -72,6 +72,7 @@ class LogWriter {
     let baseDir: String
     private let encoder: JSONEncoder
     private let fm = FileManager.default
+    private var seenIDs: [String: Set<String>] = [:]
 
     init(baseDir: String) {
         self.baseDir = baseDir
@@ -85,6 +86,12 @@ class LogWriter {
         let date = extractDate(from: record.ts)
         let filePath = "\(dirPath)/\(date).jsonl"
 
+        if seenIDs[filePath] == nil {
+            seenIDs[filePath] = loadExistingIDs(from: filePath)
+        }
+
+        guard seenIDs[filePath]!.insert(record.id).inserted else { return }
+
         let data = try encoder.encode(record)
         let line = data + Data("\n".utf8)
 
@@ -96,6 +103,22 @@ class LogWriter {
         } else {
             try line.write(to: URL(fileURLWithPath: filePath))
         }
+    }
+
+    private func loadExistingIDs(from filePath: String) -> Set<String> {
+        guard let data = fm.contents(atPath: filePath),
+              let content = String(data: data, encoding: .utf8) else {
+            return []
+        }
+        var ids = Set<String>()
+        for line in content.components(separatedBy: "\n") where !line.isEmpty {
+            if let jsonData = line.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+               let id = json["id"] as? String {
+                ids.insert(id)
+            }
+        }
+        return ids
     }
 
     func attachmentDir(network: String, chatTitle: String, date: String) -> String {
