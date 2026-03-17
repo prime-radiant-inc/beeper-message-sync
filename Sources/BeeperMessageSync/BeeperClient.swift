@@ -22,12 +22,16 @@ struct BeeperClient: Sendable {
     func listChats(
         limit: Int? = nil,
         cursor: String? = nil,
-        direction: String? = nil
+        direction: String? = nil,
+        accountIDs: [String]? = nil
     ) async throws -> ChatListResponse {
         var query: [(String, String)] = []
         if let limit { query.append(("limit", String(limit))) }
         if let cursor { query.append(("cursor", cursor)) }
         if let direction { query.append(("direction", direction)) }
+        if let accountIDs {
+            for id in accountIDs { query.append(("accountIDs", id)) }
+        }
         return try await get(path: "/v1/chats", query: query)
     }
 
