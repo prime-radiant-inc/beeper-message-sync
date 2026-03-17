@@ -33,12 +33,12 @@ class SyncEngine {
 
         // Fetch all chats per-account to ensure complete coverage.
         // The global endpoint caps results and drops older chats.
-        let accounts = try await client.listAccounts()
-        for account in accounts {
+        let accountIDs = try await discoverAccountIDs()
+        for accountID in accountIDs {
             var cursor: String? = nil
             repeat {
                 let response = try await client.listChats(
-                    cursor: cursor, accountIDs: [account.accountID]
+                    cursor: cursor, accountIDs: [accountID]
                 )
                 for chat in response.items {
                     if seenIDs.insert(chat.id).inserted {
@@ -301,6 +301,37 @@ class SyncEngine {
         }
 
         return sorted.count
+    }
+
+    // MARK: - Account discovery
+
+    /// Discover all account IDs by combining /v1/accounts with account IDs
+    /// found in the chat list. Some accounts (like iMessage) have chats but
+    /// aren't listed in /v1/accounts.
+    func discoverAccountIDs() async throws -> [String] {
+        var accountIDs = Set<String>()
+
+        // Start with known accounts
+        let accounts = try await client.listAccounts()
+        for account in accounts {
+            accountIDs.insert(account.accountID)
+        }
+
+        // Also scan the global chat list for any unlisted account IDs
+        var cursor: String? = nil
+        repeat {
+            let response = try await client.listChats(cursor: cursor)
+            for chat in response.items {
+                accountIDs.insert(chat.accountID)
+            }
+            if response.hasMore, let nextCursor = response.oldestCursor {
+                cursor = nextCursor
+            } else {
+                break
+            }
+        } while true
+
+        return accountIDs.sorted()
     }
 
     // MARK: - Helpers

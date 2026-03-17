@@ -60,19 +60,21 @@ func runBackfill(engine: SyncEngine) async throws {
     // Backfill per-account to ensure we get all chats.
     // The global /v1/chats endpoint caps results and drops older chats
     // from accounts with less recent activity.
-    let accounts = try await engine.client.listAccounts()
+    // Discover account IDs from both /v1/accounts AND from the chat list
+    // (some accounts like iMessage appear in chats but not in /v1/accounts).
+    let accountIDs = try await engine.discoverAccountIDs()
     var chatIndex = 0
     var failCount = 0
     var skipCount = 0
     var seenIDs = Set<String>()
 
-    for account in accounts {
-        print("Account: \(account.network) (\(account.accountID))")
+    for accountID in accountIDs {
+        print("Account: \(accountID)")
         var cursor: String? = nil
 
         repeat {
             let response = try await engine.client.listChats(
-                cursor: cursor, accountIDs: [account.accountID]
+                cursor: cursor, accountIDs: [accountID]
             )
             for chat in response.items {
                 guard seenIDs.insert(chat.id).inserted else { continue }
