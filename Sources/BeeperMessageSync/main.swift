@@ -57,49 +57,37 @@ default:
 // MARK: - Functions
 
 func runBackfill(engine: SyncEngine) async throws {
-    // Backfill per-account to ensure we get all chats.
-    // The global /v1/chats endpoint caps results and drops older chats
-    // from accounts with less recent activity.
-    // Discover account IDs from both /v1/accounts AND from the chat list
-    // (some accounts like iMessage appear in chats but not in /v1/accounts).
-    let accountIDs = try await engine.discoverAccountIDs()
+    var cursor: String? = nil
     var chatIndex = 0
     var failCount = 0
     var skipCount = 0
     var seenIDs = Set<String>()
 
-    for accountID in accountIDs {
-        print("Account: \(accountID)")
-        var cursor: String? = nil
-
-        repeat {
-            let response = try await engine.client.listChats(
-                cursor: cursor, accountIDs: [accountID]
-            )
-            for chat in response.items {
-                guard seenIDs.insert(chat.id).inserted else { continue }
-                chatIndex += 1
-                let resolved = engine.resolvedTitle(for: chat)
-                if !engine.filter.matchesChat(chat, resolvedTitle: resolved) {
-                    skipCount += 1
-                    continue
-                }
-                print("  [\(chatIndex)] \(chat.title)...", terminator: "")
-                do {
-                    let count = try await engine.backfillChat(chat)
-                    print(" \(count) messages")
-                } catch {
-                    print(" ERROR: \(error.localizedDescription)")
-                    failCount += 1
-                }
+    repeat {
+        let response = try await engine.client.listChats(cursor: cursor)
+        for chat in response.items {
+            guard seenIDs.insert(chat.id).inserted else { continue }
+            chatIndex += 1
+            let resolved = engine.resolvedTitle(for: chat)
+            if !engine.filter.matchesChat(chat, resolvedTitle: resolved) {
+                skipCount += 1
+                continue
             }
-            if response.hasMore, let nextCursor = response.oldestCursor {
-                cursor = nextCursor
-            } else {
-                break
+            print("  [\(chatIndex)] \(chat.network): \(chat.title)...", terminator: "")
+            do {
+                let count = try await engine.backfillChat(chat)
+                print(" \(count) messages")
+            } catch {
+                print(" ERROR: \(error.localizedDescription)")
+                failCount += 1
             }
-        } while true
-    }
+        }
+        if response.hasMore, let nextCursor = response.oldestCursor {
+            cursor = nextCursor
+        } else {
+            break
+        }
+    } while true
 
     var summary = "Backfill complete. \(chatIndex) chats"
     if skipCount > 0 { summary += ", \(skipCount) skipped" }

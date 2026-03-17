@@ -31,27 +31,22 @@ class SyncEngine {
         var allChats: [Chat] = []
         var seenIDs = Set<String>()
 
-        // Fetch all chats per-account to ensure complete coverage.
-        // The global endpoint caps results and drops older chats.
-        let accountIDs = try await discoverAccountIDs()
-        for accountID in accountIDs {
-            var cursor: String? = nil
-            repeat {
-                let response = try await client.listChats(
-                    cursor: cursor, accountIDs: [accountID]
-                )
-                for chat in response.items {
-                    if seenIDs.insert(chat.id).inserted {
-                        allChats.append(chat)
-                    }
+        // Fetch all chats via /v1/chats/search (the /v1/chats endpoint
+        // silently caps results at ~25 per account)
+        var cursor: String? = nil
+        repeat {
+            let response = try await client.listChats(cursor: cursor)
+            for chat in response.items {
+                if seenIDs.insert(chat.id).inserted {
+                    allChats.append(chat)
                 }
-                if response.hasMore, let nextCursor = response.oldestCursor {
-                    cursor = nextCursor
-                } else {
-                    break
-                }
-            } while true
-        }
+            }
+            if response.hasMore, let nextCursor = response.oldestCursor {
+                cursor = nextCursor
+            } else {
+                break
+            }
+        } while true
 
         for chat in allChats {
             // Skip chats that don't match the filter
