@@ -9,6 +9,8 @@ class SyncEngine {
     let contactResolver: ContactResolver
     let filter: SyncFilter
     let config: Config
+    private var chatErrorCounts: [String: Int] = [:]
+    private var chatLastError: [String: String] = [:]
 
     init(config: Config, filter: SyncFilter = SyncFilter(), contactResolver: ContactResolver? = nil) {
         self.config = config
@@ -28,11 +30,12 @@ class SyncEngine {
 
     /// Run a single poll cycle: check all chats for new messages
     func pollOnce() async throws {
-        var cursor: String? = nil
         var allChats: [Chat] = []
         var seenIDs = Set<String>()
 
-        // Fetch all chats (paginate, dedup overlapping pages)
+        // Fetch all chats via /v1/chats/search (the /v1/chats endpoint
+        // silently caps results at ~25 per account)
+        var cursor: String? = nil
         repeat {
             let response = try await client.listChats(cursor: cursor)
             for chat in response.items {
@@ -40,9 +43,7 @@ class SyncEngine {
                     allChats.append(chat)
                 }
             }
-            if response.hasMore, let last = response.items.last {
-                let nextCursor = last.lastActivity
-                if nextCursor == cursor { break }
+            if response.hasMore, let nextCursor = response.oldestCursor {
                 cursor = nextCursor
             } else {
                 break
@@ -66,8 +67,25 @@ class SyncEngine {
 
             do {
                 try await syncChat(chat)
+                // Clear error state on success
+                if chatErrorCounts[chat.id] != nil {
+                    let count = chatErrorCounts[chat.id] ?? 0
+                    if count > 1 {
+                        print("  Sync recovered for \(chat.title) (after \(count) errors)")
+                    }
+                    chatErrorCounts.removeValue(forKey: chat.id)
+                    chatLastError.removeValue(forKey: chat.id)
+                }
             } catch {
-                print("  Error syncing \(chat.title): \(error.localizedDescription)")
+                let msg = error.localizedDescription
+                let count = (chatErrorCounts[chat.id] ?? 0) + 1
+                chatErrorCounts[chat.id] = count
+                if count == 1 || msg != chatLastError[chat.id] {
+                    print("  Error syncing \(chat.title): \(msg)")
+                    chatLastError[chat.id] = msg
+                } else if count & (count - 1) == 0 { // powers of 2
+                    print("  Error syncing \(chat.title) (repeated \(count)x): \(msg)")
+                }
             }
         }
 
@@ -79,46 +97,56 @@ class SyncEngine {
         let displayTitle = resolvedTitle(for: chat)
 
         let chatDir = logWriter.chatDir(network: chat.network, chatTitle: displayTitle)
-        try FileManager.default.createDirectory(
-            atPath: chatDir, withIntermediateDirectories: true
-        )
+        try createDirectoryWithPOSIX(atPath: chatDir)
 
         // Metadata is supplementary — don't let write failures block message sync
         do {
             let metadata = buildMetadata(from: chat, resolvedTitle: displayTitle)
             try metadataWriter.write(metadata: metadata, toDir: chatDir)
         } catch {
-            print("  WARNING: failed to write metadata for \(displayTitle): \(error.localizedDescription)")
+            print("  WARNING: failed to write metadata for \(displayTitle): \(error)")
         }
 
-        // Fetch messages newer than our last seen sort key
+        // Fetch messages newer than our last seen sort key by paginating
+        // backward from the newest message until we reach lastSortKey.
+        // The Beeper API always returns results in descending order,
+        // so we use direction=before for pagination (not direction=after,
+        // which causes an overlapping-page infinite loop).
         let lastSortKey = stateStore.lastSortKey(for: chat.id)
         var newMessages: [Message] = []
-        var msgCursor: String? = lastSortKey
-        let direction: String? = lastSortKey != nil ? "after" : nil
+        var msgCursor: String? = nil
+        var reachedStoredState = false
 
         repeat {
             let response = try await client.listMessages(
                 chatID: chat.id,
                 cursor: msgCursor,
-                direction: direction
+                direction: msgCursor != nil ? "before" : nil
             )
-            newMessages.append(contentsOf: response.items)
-            if response.hasMore, let last = response.items.last?.sortKey {
+
+            for message in response.items {
+                if let sortKey = message.sortKey, let last = lastSortKey, sortKey <= last {
+                    reachedStoredState = true
+                    break
+                }
+                newMessages.append(message)
+            }
+
+            if reachedStoredState || !response.hasMore {
+                break
+            }
+            if let last = response.items.last?.sortKey {
                 msgCursor = last
             } else {
                 break
             }
         } while true
 
-        // Filter out already-seen messages and sort by timestamp
-        let filtered = newMessages.filter { msg in
-            guard let sortKey = msg.sortKey, let last = lastSortKey else { return true }
-            return sortKey > last
-        }
+        // Sort chronologically (API returns newest-first)
+        let sorted = newMessages.sorted { ($0.sortKey ?? "") < ($1.sortKey ?? "") }
 
         // Apply date filter and write messages
-        let dateFiltered = filtered.filter { filter.matchesTimestamp($0.timestamp) }
+        let dateFiltered = sorted.filter { filter.matchesTimestamp($0.timestamp) }
         for message in dateFiltered {
             let date = extractDate(from: message.timestamp)
 
@@ -167,9 +195,9 @@ class SyncEngine {
             try logWriter.write(record: record, toDir: chatDir)
         }
 
-        // Update state — use the last message from the full filtered set
+        // Update state — use the last message from the full sorted set
         // (not dateFiltered) so we don't re-fetch messages we skipped
-        if let lastMsg = filtered.last {
+        if let lastMsg = sorted.last {
             stateStore.update(
                 chatID: chat.id,
                 lastSortKey: lastMsg.sortKey,
@@ -190,16 +218,14 @@ class SyncEngine {
         let displayTitle = resolvedTitle(for: chat)
 
         let chatDir = logWriter.chatDir(network: chat.network, chatTitle: displayTitle)
-        try FileManager.default.createDirectory(
-            atPath: chatDir, withIntermediateDirectories: true
-        )
+        try createDirectoryWithPOSIX(atPath: chatDir)
 
         // Metadata is supplementary — don't let write failures block message sync
         do {
             let metadata = buildMetadata(from: chat, resolvedTitle: displayTitle)
             try metadataWriter.write(metadata: metadata, toDir: chatDir)
         } catch {
-            print("  WARNING: failed to write metadata for \(displayTitle): \(error.localizedDescription)")
+            print("  WARNING: failed to write metadata for \(displayTitle): \(error)")
         }
 
         var allMessages: [Message] = []
@@ -291,6 +317,37 @@ class SyncEngine {
         return sorted.count
     }
 
+    // MARK: - Account discovery
+
+    /// Discover all account IDs by combining /v1/accounts with account IDs
+    /// found in the chat list. Some accounts (like iMessage) have chats but
+    /// aren't listed in /v1/accounts.
+    func discoverAccountIDs() async throws -> [String] {
+        var accountIDs = Set<String>()
+
+        // Start with known accounts
+        let accounts = try await client.listAccounts()
+        for account in accounts {
+            accountIDs.insert(account.accountID)
+        }
+
+        // Also scan the global chat list for any unlisted account IDs
+        var cursor: String? = nil
+        repeat {
+            let response = try await client.listChats(cursor: cursor)
+            for chat in response.items {
+                accountIDs.insert(chat.accountID)
+            }
+            if response.hasMore, let nextCursor = response.oldestCursor {
+                cursor = nextCursor
+            } else {
+                break
+            }
+        } while true
+
+        return accountIDs.sorted()
+    }
+
     // MARK: - Helpers
 
     /// Resolve chat title to contact name(s) for iMessage phone-number titles
@@ -305,15 +362,29 @@ class SyncEngine {
             }
         }
 
-        // Group chat: title may be comma-separated phone numbers
-        if chat.type == "group" && ContactResolver.looksLikePhoneNumber(chat.title) {
+        // Group chat: resolve participant phone numbers to names.
+        // Skip if the group already has a meaningful name (not just phone numbers).
+        // Title formats vary: "+1 617-571-3000, +1 617-817-6446 & 2 others"
+        // but participant phones are "+16175713000". Compare by normalizing
+        // the title's digit sequences against participant phone suffixes.
+        if chat.type == "group" {
             let nonSelfParticipants = chat.participants.items.filter { !($0.isSelf ?? false) }
-            let resolvedNames = nonSelfParticipants.compactMap { user -> String? in
-                guard let phone = user.phoneNumber else { return user.fullName ?? user.username }
-                return contactResolver.resolve(phone) ?? user.fullName ?? user.username ?? phone
+            let hasPhoneParticipants = nonSelfParticipants.contains { $0.phoneNumber != nil }
+            let titleDigits = chat.title.filter(\.isNumber)
+            let titleIsPhoneNumbers = hasPhoneParticipants && nonSelfParticipants.contains {
+                guard let phone = $0.phoneNumber else { return false }
+                let phoneDigits = phone.filter(\.isNumber)
+                guard phoneDigits.count >= 7 else { return false }
+                return titleDigits.contains(phoneDigits)
             }
-            if !resolvedNames.isEmpty {
-                return resolvedNames.joined(separator: ", ")
+            if titleIsPhoneNumbers {
+                let resolvedNames = nonSelfParticipants.compactMap { user -> String? in
+                    guard let phone = user.phoneNumber else { return user.fullName ?? user.username }
+                    return contactResolver.resolve(phone) ?? user.fullName ?? user.username ?? phone
+                }
+                if !resolvedNames.isEmpty {
+                    return resolvedNames.joined(separator: ", ")
+                }
             }
         }
 
