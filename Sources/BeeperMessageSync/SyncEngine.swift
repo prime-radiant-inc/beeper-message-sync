@@ -28,24 +28,30 @@ class SyncEngine {
 
     /// Run a single poll cycle: check all chats for new messages
     func pollOnce() async throws {
-        var cursor: String? = nil
         var allChats: [Chat] = []
         var seenIDs = Set<String>()
 
-        // Fetch all chats (paginate, dedup overlapping pages)
-        repeat {
-            let response = try await client.listChats(cursor: cursor)
-            for chat in response.items {
-                if seenIDs.insert(chat.id).inserted {
-                    allChats.append(chat)
+        // Fetch all chats per-account to ensure complete coverage.
+        // The global endpoint caps results and drops older chats.
+        let accounts = try await client.listAccounts()
+        for account in accounts {
+            var cursor: String? = nil
+            repeat {
+                let response = try await client.listChats(
+                    cursor: cursor, accountIDs: [account.accountID]
+                )
+                for chat in response.items {
+                    if seenIDs.insert(chat.id).inserted {
+                        allChats.append(chat)
+                    }
                 }
-            }
-            if response.hasMore, let nextCursor = response.oldestCursor {
-                cursor = nextCursor
-            } else {
-                break
-            }
-        } while true
+                if response.hasMore, let nextCursor = response.oldestCursor {
+                    cursor = nextCursor
+                } else {
+                    break
+                }
+            } while true
+        }
 
         for chat in allChats {
             // Skip chats that don't match the filter
