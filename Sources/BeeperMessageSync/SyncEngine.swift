@@ -9,6 +9,8 @@ class SyncEngine {
     let contactResolver: ContactResolver
     let filter: SyncFilter
     let config: Config
+    private var chatErrorCounts: [String: Int] = [:]
+    private var chatLastError: [String: String] = [:]
 
     init(config: Config, filter: SyncFilter = SyncFilter(), contactResolver: ContactResolver? = nil) {
         self.config = config
@@ -65,8 +67,25 @@ class SyncEngine {
 
             do {
                 try await syncChat(chat)
+                // Clear error state on success
+                if chatErrorCounts[chat.id] != nil {
+                    let count = chatErrorCounts[chat.id] ?? 0
+                    if count > 1 {
+                        print("  Sync recovered for \(chat.title) (after \(count) errors)")
+                    }
+                    chatErrorCounts.removeValue(forKey: chat.id)
+                    chatLastError.removeValue(forKey: chat.id)
+                }
             } catch {
-                print("  Error syncing \(chat.title): \(error) [\(error as NSError)]")
+                let msg = error.localizedDescription
+                let count = (chatErrorCounts[chat.id] ?? 0) + 1
+                chatErrorCounts[chat.id] = count
+                if count == 1 || msg != chatLastError[chat.id] {
+                    print("  Error syncing \(chat.title): \(msg)")
+                    chatLastError[chat.id] = msg
+                } else if count & (count - 1) == 0 { // powers of 2
+                    print("  Error syncing \(chat.title) (repeated \(count)x): \(msg)")
+                }
             }
         }
 
