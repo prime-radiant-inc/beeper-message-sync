@@ -19,6 +19,8 @@ struct BeeperClient: Sendable {
 
     // MARK: - Chats
 
+    /// List chats using /v1/chats/search which returns all chats
+    /// (/v1/chats silently caps results at ~25 per account)
     func listChats(
         limit: Int? = nil,
         cursor: String? = nil,
@@ -26,13 +28,13 @@ struct BeeperClient: Sendable {
         accountIDs: [String]? = nil
     ) async throws -> ChatListResponse {
         var query: [(String, String)] = []
-        if let limit { query.append(("limit", String(limit))) }
+        query.append(("limit", String(limit ?? 200)))
         if let cursor { query.append(("cursor", cursor)) }
         if let direction { query.append(("direction", direction)) }
         if let accountIDs {
             for id in accountIDs { query.append(("accountIDs", id)) }
         }
-        return try await get(path: "/v1/chats", query: query)
+        return try await get(path: "/v1/chats/search", query: query)
     }
 
     // MARK: - Messages
