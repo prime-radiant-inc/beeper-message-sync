@@ -82,9 +82,8 @@ func runBackfill(engine: SyncEngine) async throws {
                 failCount += 1
             }
         }
-        if response.hasMore, let last = response.items.last?.lastActivity {
-            if last == cursor { break }
-            cursor = last
+        if response.hasMore, let nextCursor = response.oldestCursor {
+            cursor = nextCursor
         } else {
             break
         }
@@ -98,13 +97,35 @@ func runBackfill(engine: SyncEngine) async throws {
 }
 
 func runWatch(engine: SyncEngine, interval: Int) async throws {
+    var consecutiveErrors = 0
+    var lastErrorMessage = ""
+
     while true {
         do {
             try await engine.pollOnce()
+            if consecutiveErrors > 0 {
+                if consecutiveErrors > 1 {
+                    print("Connection restored (suppressed \(consecutiveErrors - 1) repeated errors)")
+                }
+                consecutiveErrors = 0
+                lastErrorMessage = ""
+            }
         } catch {
-            print("Poll error: \(error.localizedDescription)")
+            let msg = error.localizedDescription
+            consecutiveErrors += 1
+            if consecutiveErrors == 1 || msg != lastErrorMessage {
+                print("Poll error: \(msg)")
+                lastErrorMessage = msg
+            } else if consecutiveErrors & (consecutiveErrors - 1) == 0 {
+                // Log at powers of 2: 2, 4, 8, 16, ...
+                print("Poll error (repeated \(consecutiveErrors)x): \(msg)")
+            }
         }
-        try await Task.sleep(for: .seconds(interval))
+        // Exponential backoff on errors: 5s, 10s, 20s, ... up to 5 minutes
+        let backoff = consecutiveErrors > 0
+            ? min(interval * (1 << min(consecutiveErrors - 1, 6)), 300)
+            : interval
+        try await Task.sleep(for: .seconds(backoff))
     }
 }
 

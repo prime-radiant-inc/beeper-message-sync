@@ -160,6 +160,37 @@ final class LogWriterTests: XCTestCase {
             atPath: "\(tmpDir!)/signal/Bob/2026-02-13.jsonl"))
     }
 
+    func testWriteSkipsDuplicateMessageIDs() throws {
+        let writer = LogWriter(baseDir: tmpDir)
+        let dir = writer.chatDir(network: "Signal", chatTitle: "Alice")
+        let record = makeRecord(id: "msg1", ts: "2026-02-12T15:30:00Z", text: "Hello!")
+        try writer.write(record: record, toDir: dir)
+        try writer.write(record: record, toDir: dir)  // duplicate
+
+        let path = "\(tmpDir!)/signal/Alice/2026-02-12.jsonl"
+        let lines = try String(contentsOfFile: path, encoding: .utf8)
+            .components(separatedBy: "\n")
+            .filter { !$0.isEmpty }
+        XCTAssertEqual(lines.count, 1, "Duplicate message should not be appended")
+    }
+
+    func testDeduplicatesAcrossExistingFile() throws {
+        let writer1 = LogWriter(baseDir: tmpDir)
+        let dir = writer1.chatDir(network: "Signal", chatTitle: "Alice")
+        let record = makeRecord(id: "msg1", ts: "2026-02-12T15:30:00Z", text: "Hello!")
+        try writer1.write(record: record, toDir: dir)
+
+        // New writer instance should detect existing IDs from file
+        let writer2 = LogWriter(baseDir: tmpDir)
+        try writer2.write(record: record, toDir: dir)
+
+        let path = "\(tmpDir!)/signal/Alice/2026-02-12.jsonl"
+        let lines = try String(contentsOfFile: path, encoding: .utf8)
+            .components(separatedBy: "\n")
+            .filter { !$0.isEmpty }
+        XCTAssertEqual(lines.count, 1, "Duplicate from prior session should not be appended")
+    }
+
     // MARK: - Helpers
 
     private func makeRecord(id: String, ts: String, text: String) -> MessageRecord {

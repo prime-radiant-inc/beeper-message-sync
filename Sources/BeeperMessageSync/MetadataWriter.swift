@@ -52,6 +52,6 @@ struct MetadataWriter {
         }
 
         let data = try encoder.encode(finalMetadata)
-        try data.write(to: URL(fileURLWithPath: path))
+        try writeDataToPath(data, path: path)
     }
 }

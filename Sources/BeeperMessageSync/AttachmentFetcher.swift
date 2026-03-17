@@ -11,18 +11,31 @@ struct AttachmentFetcher {
         chatTitle: String,
         date: String
     ) async throws -> String? {
-        guard let assetID = attachment.id else { return nil }
-
-        // Ask Beeper to download the asset and give us a local file path
-        let response = try await client.downloadAsset(url: assetID)
-        guard let srcURL = response.srcURL else {
-            if let error = response.error {
-                print("  Warning: attachment download failed: \(error)")
+        // If the attachment already has a local file URL, use it directly
+        // (common for iMessage attachments stored in ~/Library/Messages/)
+        let sourcePath: String
+        if let src = attachment.srcURL, src.hasPrefix("file://") {
+            sourcePath = Self.parseFileURL(src)
+        } else if let src = attachment.srcURL, src.hasPrefix("asset://") {
+            // asset:// URLs contain hex-encoded local file paths after the account ID
+            if let path = Self.parseAssetURL(src) {
+                sourcePath = path
+            } else {
+                return nil
             }
-            return nil
-        }
+        } else {
+            guard let assetID = attachment.id else { return nil }
 
-        let sourcePath = Self.parseFileURL(srcURL)
+            // Ask Beeper to download the asset and give us a local file path
+            let response = try await client.downloadAsset(url: assetID)
+            guard let srcURL = response.srcURL else {
+                if let error = response.error {
+                    print("  Warning: attachment download failed: \(error)")
+                }
+                return nil
+            }
+            sourcePath = Self.parseFileURL(srcURL)
+        }
         let destDir = logWriter.attachmentDir(
             network: network, chatTitle: chatTitle, date: date
         )
@@ -39,6 +52,24 @@ struct AttachmentFetcher {
             return String(destPath.dropFirst(chatDir.count + 1))
         }
         return destPath
+    }
+
+    /// Parse an asset:// URL with hex-encoded path to a filesystem path
+    /// Format: asset://<accountID>/<hex-encoded-path>
+    static func parseAssetURL(_ urlString: String) -> String? {
+        guard urlString.hasPrefix("asset://") else { return nil }
+        let stripped = String(urlString.dropFirst("asset://".count))
+        // Path is after the first /
+        guard let slashIndex = stripped.firstIndex(of: "/") else { return nil }
+        let hexPath = String(stripped[stripped.index(after: slashIndex)...])
+        // Decode hex to bytes to string
+        var bytes = [UInt8]()
+        var chars = hexPath.makeIterator()
+        while let hi = chars.next(), let lo = chars.next() {
+            guard let byte = UInt8(String([hi, lo]), radix: 16) else { return nil }
+            bytes.append(byte)
+        }
+        return String(bytes: bytes, encoding: .utf8)
     }
 
     /// Parse a file:// URL to a filesystem path
@@ -62,7 +93,7 @@ struct AttachmentFetcher {
         fileName: String
     ) throws -> String {
         let fm = FileManager.default
-        try fm.createDirectory(atPath: destDir, withIntermediateDirectories: true)
+        try createDirectoryWithPOSIX(atPath: destDir)
 
         var destPath = "\(destDir)/\(fileName)"
         if fm.fileExists(atPath: destPath) {
