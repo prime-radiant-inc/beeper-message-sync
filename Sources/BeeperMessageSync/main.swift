@@ -33,6 +33,7 @@ switch mode {
 case "backfill":
     try await runBackfill(engine: engine)
 case "watch":
+    try acquirePidLock(pidFile: NSHomeDirectory() + "/.config/beeper-message-sync/daemon.pid")
     if !engine.stateStore.hasState {
         print("No state found. Running initial backfill...")
         try await runBackfill(engine: engine)
@@ -190,6 +191,28 @@ func parseArgs() -> (mode: String, filter: SyncFilter) {
         until: until
     )
     return (mode, filter)
+}
+
+nonisolated(unsafe) var activePidFile: String?
+
+func acquirePidLock(pidFile: String) throws {
+    let fm = FileManager.default
+    let pid = ProcessInfo.processInfo.processIdentifier
+
+    if let existingData = fm.contents(atPath: pidFile),
+       let existingStr = String(data: existingData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+       let existingPid = Int32(existingStr) {
+        // Check if that process is still running
+        if kill(existingPid, 0) == 0 {
+            print("Error: another daemon is already running (PID \(existingPid), pidfile: \(pidFile))")
+            exit(1)
+        }
+    }
+
+    try createDirectoryWithPOSIX(atPath: URL(fileURLWithPath: pidFile).deletingLastPathComponent().path)
+    try writeDataToPath(Data("\(pid)\n".utf8), path: pidFile)
+    activePidFile = pidFile
+    atexit { if let path = activePidFile { unlink(path) } }
 }
 
 func grantContacts() async throws {
