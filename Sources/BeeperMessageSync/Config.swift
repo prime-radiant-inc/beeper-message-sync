@@ -18,9 +18,9 @@ struct Config {
         // 1. Start with defaults + Keychain token
         var token: String? = KeychainHelper.loadToken(service: keychainService)
         var url = "http://localhost:23373"
-        var logDir = NSHomeDirectory() + "/Dropbox/Message-Sync/logs"
+        var logDir = NSHomeDirectory() + "/Dropbox/Beeper-Sync/logs"
         var pollInterval = 5
-        var stateFile = NSHomeDirectory() + "/Dropbox/Message-Sync/state.json"
+        var stateFile = NSHomeDirectory() + "/Dropbox/Beeper-Sync/state.json"
 
         // 2. Override from config file
         if let data = FileManager.default.contents(atPath: configPath),
