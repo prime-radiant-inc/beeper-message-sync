@@ -33,7 +33,7 @@ switch mode {
 case "backfill":
     try await runBackfill(engine: engine)
 case "backfill-imessage":
-    try runImessageBackfill(engine: engine)
+    try await runImessageBackfill(engine: engine)
 case "watch":
     try acquirePidLock(pidFile: NSHomeDirectory() + "/.config/beeper-message-sync/daemon.pid")
     if !engine.stateStore.hasState {
@@ -100,7 +100,7 @@ func runBackfill(engine: SyncEngine) async throws {
     print(summary)
 }
 
-func runImessageBackfill(engine: SyncEngine) throws {
+func runImessageBackfill(engine: SyncEngine) async throws {
     let reader = ChatDBReader()
     let chats = try reader.listChats()
     let contactResolver = engine.contactResolver
@@ -108,7 +108,12 @@ func runImessageBackfill(engine: SyncEngine) throws {
     var chatIndex = 0
     var msgTotal = 0
     var failCount = 0
-    let networkDir = "imessage"
+
+    // Use the same network directory as the Beeper API backfill
+    // so both sources write to the same location and dedup works
+    let accountIDs = try await engine.discoverAccountIDs()
+    let networkDir = accountIDs.first(where: { $0.lowercased().contains("imessage") })
+        ?? "imessage"
 
     print("Reading from \(reader.dbPath)")
     print("Found \(chats.count) chats in Messages database")
