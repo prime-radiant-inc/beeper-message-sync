@@ -36,6 +36,18 @@ struct SyncFilter: Sendable {
         return true
     }
 
+    /// Check if a chat matches by network name and title strings (for non-API sources)
+    func matchesChat(networkName: String, title: String) -> Bool {
+        if let networks {
+            guard networks.contains(networkName.lowercased()) else { return false }
+        }
+        if let chatTitles {
+            let titleLower = title.lowercased()
+            guard chatTitles.contains(where: { titleLower.contains($0) }) else { return false }
+        }
+        return true
+    }
+
     /// Check if a timestamp falls within the since/until bounds.
     /// Returns true when no date filter is set.
     func matchesTimestamp(_ timestamp: String) -> Bool {
