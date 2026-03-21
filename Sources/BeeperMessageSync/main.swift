@@ -32,6 +32,8 @@ print("  State file: \(config.stateFile)")
 switch mode {
 case "backfill":
     try await runBackfill(engine: engine)
+case "backfill-imessage":
+    try runImessageBackfill(engine: engine)
 case "watch":
     try acquirePidLock(pidFile: NSHomeDirectory() + "/.config/beeper-message-sync/daemon.pid")
     if !engine.stateStore.hasState {
@@ -42,10 +44,11 @@ case "watch":
     try await runWatch(engine: engine, interval: config.pollInterval)
 default:
     print("Usage: beeper-message-sync [watch|backfill|setup|grant-contacts] [options]")
-    print("  watch           - Poll for new messages (default). Runs backfill first if no state.")
-    print("  backfill        - Full historical backfill, then exit.")
-    print("  setup           - Interactive setup wizard (token, paths, config file).")
-    print("  grant-contacts  - Request Contacts access (run interactively from Terminal).")
+    print("  watch              - Poll for new messages (default). Runs backfill first if no state.")
+    print("  backfill           - Full historical backfill from Beeper API, then exit.")
+    print("  backfill-imessage  - Backfill iMessage history from local Messages database.")
+    print("  setup              - Interactive setup wizard (token, paths, config file).")
+    print("  grant-contacts     - Request Contacts access (run interactively from Terminal).")
     print("")
     print("Options:")
     print("  --network <names>  Comma-separated networks (e.g. \"imessage,signal\")")
@@ -95,6 +98,142 @@ func runBackfill(engine: SyncEngine) async throws {
     if failCount > 0 { summary += ", \(failCount) failed" }
     summary += "."
     print(summary)
+}
+
+func runImessageBackfill(engine: SyncEngine) throws {
+    let reader = ChatDBReader()
+    let chats = try reader.listChats()
+    let contactResolver = engine.contactResolver
+
+    var chatIndex = 0
+    var msgTotal = 0
+    var failCount = 0
+    let networkDir = "imessage"
+
+    print("Reading from \(reader.dbPath)")
+    print("Found \(chats.count) chats in Messages database")
+
+    for chat in chats {
+        guard chat.messageCount > 0 else { continue }
+        chatIndex += 1
+
+        // Resolve chat title from participants
+        let displayName = chat.displayName.flatMap { $0.isEmpty ? nil : $0 }
+        let rawTitle = displayName
+            ?? chat.participantIDs.first
+            ?? chat.chatIdentifier
+        let resolvedTitle: String
+        if ContactResolver.looksLikePhoneNumber(rawTitle) {
+            resolvedTitle = contactResolver.resolve(rawTitle) ?? rawTitle
+        } else if rawTitle.contains("@") {
+            // Email-based iMessage — try to resolve via contacts
+            resolvedTitle = rawTitle
+        } else {
+            resolvedTitle = rawTitle
+        }
+
+        if !engine.filter.matchesChat(networkName: networkDir, title: resolvedTitle) {
+            continue
+        }
+
+        let chatDir = engine.logWriter.chatDir(
+            network: networkDir, chatTitle: resolvedTitle
+        )
+        try createDirectoryWithPOSIX(atPath: chatDir)
+
+        print("  [\(chatIndex)] \(resolvedTitle)...", terminator: "")
+
+        do {
+            let messages = try reader.listMessages(chatRowID: chat.rowID)
+            var written = 0
+            for msg in messages {
+                let date = extractDateFromTimestamp(msg.timestamp)
+
+                var attachmentRecords: [AttachmentRecord] = []
+                for att in msg.attachments {
+                    let srcPath = att.filename.map { expandTilde($0) }
+                    var localPath: String? = nil
+                    if let src = srcPath,
+                       FileManager.default.fileExists(atPath: src) {
+                        let destDir = engine.logWriter.attachmentDir(
+                            network: networkDir, chatTitle: resolvedTitle, date: date
+                        )
+                        let fileName = att.transferName
+                            ?? URL(fileURLWithPath: src).lastPathComponent
+                        do {
+                            let dest = try AttachmentFetcher.copyAttachment(
+                                from: src, toDir: destDir, fileName: fileName
+                            )
+                            let chatDirPath = engine.logWriter.chatDir(
+                                network: networkDir, chatTitle: resolvedTitle
+                            )
+                            localPath = dest.hasPrefix(chatDirPath)
+                                ? String(dest.dropFirst(chatDirPath.count + 1))
+                                : dest
+                        } catch {
+                            // Attachment copy failed — record without local path
+                        }
+                    }
+                    attachmentRecords.append(AttachmentRecord(
+                        id: nil,
+                        type: att.mimeType?.hasPrefix("image") == true ? "img"
+                            : att.mimeType?.hasPrefix("video") == true ? "video"
+                            : "file",
+                        localPath: localPath,
+                        mimeType: att.mimeType,
+                        fileName: att.transferName
+                    ))
+                }
+
+                let senderName: String?
+                if msg.isFromMe {
+                    senderName = nil
+                } else if let sid = msg.senderID {
+                    senderName = ContactResolver.looksLikePhoneNumber(sid)
+                        ? contactResolver.resolve(sid) : nil
+                } else {
+                    senderName = nil
+                }
+
+                let record = MessageRecord(
+                    id: msg.guid,
+                    ts: msg.timestamp,
+                    from: Sender(
+                        id: msg.senderID,
+                        name: senderName,
+                        self: msg.isFromMe
+                    ),
+                    text: msg.text,
+                    type: msg.attachments.isEmpty ? nil : "MEDIA",
+                    attachments: attachmentRecords,
+                    replyTo: msg.replyToGuid
+                )
+                try engine.logWriter.write(record: record, toDir: chatDir)
+                written += 1
+            }
+            msgTotal += written
+            print(" \(written) messages")
+        } catch {
+            print(" ERROR: \(error.localizedDescription)")
+            failCount += 1
+        }
+    }
+
+    print("iMessage backfill complete. \(chatIndex) chats, \(msgTotal) messages, \(failCount) failed.")
+}
+
+private func extractDateFromTimestamp(_ timestamp: String) -> String {
+    if let tIndex = timestamp.firstIndex(of: "T") {
+        return String(timestamp[timestamp.startIndex..<tIndex])
+    }
+    return String(timestamp.prefix(10))
+}
+
+private func expandTilde(_ path: String) -> String {
+    if path.hasPrefix("~") {
+        return NSHomeDirectory() + path.dropFirst()
+    }
+    return path
 }
 
 func runWatch(engine: SyncEngine, interval: Int) async throws {
