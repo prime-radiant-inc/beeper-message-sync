@@ -68,8 +68,8 @@ struct AttachmentRecord: Codable {
 
 // MARK: - LogWriter
 
-class LogWriter {
-    let baseDir: String
+actor LogWriter {
+    nonisolated let baseDir: String
     private let encoder: JSONEncoder
     private let fm = FileManager.default
     private var seenIDs: [String: Set<String>] = [:]
@@ -116,18 +116,18 @@ class LogWriter {
         return ids
     }
 
-    func attachmentDir(network: String, chatTitle: String, date: String) -> String {
+    nonisolated func attachmentDir(network: String, chatTitle: String, date: String) -> String {
         let dir = chatDir(network: network, chatTitle: chatTitle)
         return "\(dir)/\(date)"
     }
 
-    func chatDir(network: String, chatTitle: String) -> String {
+    nonisolated func chatDir(network: String, chatTitle: String) -> String {
         let sanitizedNetwork = sanitize(network).lowercased()
         let sanitizedTitle = sanitize(chatTitle)
         return "\(baseDir)/\(sanitizedNetwork)/\(sanitizedTitle)"
     }
 
-    private func sanitize(_ name: String) -> String {
+    nonisolated private func sanitize(_ name: String) -> String {
         // Percent-encode only characters illegal in filenames across macOS/Windows/Dropbox
         let illegal: [Character: String] = [
             "/": "%2F", "\\": "%5C", ":": "%3A", "*": "%2A",

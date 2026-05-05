@@ -1,6 +1,6 @@
 import Foundation
 
-class SyncEngine {
+class SyncEngine: @unchecked Sendable {
     let client: BeeperClient
     let logWriter: LogWriter
     let metadataWriter: MetadataWriter
@@ -57,7 +57,7 @@ class SyncEngine {
                 continue
             }
 
-            let storedActivity = stateStore.lastActivity(for: chat.id)
+            let storedActivity = await stateStore.lastActivity(for: chat.id)
 
             // Skip chats that haven't changed since last poll
             if let stored = storedActivity, let current = chat.lastActivity,
@@ -89,7 +89,7 @@ class SyncEngine {
             }
         }
 
-        try stateStore.save()
+        try await stateStore.save()
     }
 
     /// Fetch and log new messages for a single chat
@@ -112,7 +112,7 @@ class SyncEngine {
         // The Beeper API always returns results in descending order,
         // so we use direction=before for pagination (not direction=after,
         // which causes an overlapping-page infinite loop).
-        let lastSortKey = stateStore.lastSortKey(for: chat.id)
+        let lastSortKey = await stateStore.lastSortKey(for: chat.id)
         var newMessages: [Message] = []
         var msgCursor: String? = nil
         var reachedStoredState = false
@@ -149,62 +149,33 @@ class SyncEngine {
         let dateFiltered = sorted.filter { filter.matchesTimestamp($0.timestamp) }
         for message in dateFiltered {
             let date = extractDate(from: message.timestamp)
-
-            // Download attachments
-            var attachmentRecords: [AttachmentRecord] = []
-            for attachment in message.attachments ?? [] {
-                do {
-                    let localPath = try await attachmentFetcher.fetch(
-                        attachment: attachment,
-                        network: chat.network,
-                        chatTitle: displayTitle,
-                        date: date
-                    )
-                    attachmentRecords.append(AttachmentRecord(
-                        id: attachment.id,
-                        type: attachment.type,
-                        localPath: localPath,
-                        mimeType: attachment.mimeType,
-                        fileName: attachment.fileName
-                    ))
-                } catch {
-                    print("    WARNING: failed to download attachment \(attachment.id ?? "unknown"): \(error)")
-                    attachmentRecords.append(AttachmentRecord(
-                        id: attachment.id,
-                        type: attachment.type,
-                        localPath: nil,
-                        mimeType: attachment.mimeType,
-                        fileName: attachment.fileName
-                    ))
-                }
+            let attachmentRecords: [AttachmentRecord]
+            if filter.skipAttachments {
+                attachmentRecords = []
+            } else {
+                (attachmentRecords, _) = await fetchAttachments(
+                    for: message, network: chat.network, chatTitle: displayTitle, date: date
+                )
             }
-
             let record = MessageRecord(
-                id: message.id,
-                ts: message.timestamp,
-                from: Sender(
-                    id: message.senderID,
-                    name: message.senderName,
-                    self: message.isSender
-                ),
-                text: message.text,
-                type: message.type,
-                attachments: attachmentRecords,
-                replyTo: message.linkedMessageID
+                id: message.id, ts: message.timestamp,
+                from: Sender(id: message.senderID, name: message.senderName, self: message.isSender),
+                text: message.text, type: message.type,
+                attachments: attachmentRecords, replyTo: message.linkedMessageID
             )
-            try logWriter.write(record: record, toDir: chatDir)
+            try await logWriter.write(record: record, toDir: chatDir)
         }
 
         // Update state — use the last message from the full sorted set
         // (not dateFiltered) so we don't re-fetch messages we skipped
         if let lastMsg = sorted.last {
-            stateStore.update(
+            await stateStore.update(
                 chatID: chat.id,
                 lastSortKey: lastMsg.sortKey,
                 lastActivity: chat.lastActivity
             )
         } else if let activity = chat.lastActivity {
-            stateStore.update(
+            await stateStore.update(
                 chatID: chat.id,
                 lastSortKey: nil,
                 lastActivity: activity
@@ -260,58 +231,31 @@ class SyncEngine {
             .filter { filter.matchesTimestamp($0.timestamp) }
         for message in sorted {
             let date = extractDate(from: message.timestamp)
-            var attachmentRecords: [AttachmentRecord] = []
-            for attachment in message.attachments ?? [] {
-                do {
-                    let localPath = try await attachmentFetcher.fetch(
-                        attachment: attachment,
-                        network: chat.network,
-                        chatTitle: displayTitle,
-                        date: date
-                    )
-                    attachmentRecords.append(AttachmentRecord(
-                        id: attachment.id,
-                        type: attachment.type,
-                        localPath: localPath,
-                        mimeType: attachment.mimeType,
-                        fileName: attachment.fileName
-                    ))
-                } catch {
-                    print("    WARNING: failed to download attachment \(attachment.id ?? "unknown"): \(error)")
-                    attachmentRecords.append(AttachmentRecord(
-                        id: attachment.id,
-                        type: attachment.type,
-                        localPath: nil,
-                        mimeType: attachment.mimeType,
-                        fileName: attachment.fileName
-                    ))
-                }
+            let attachmentRecords: [AttachmentRecord]
+            if filter.skipAttachments {
+                attachmentRecords = []
+            } else {
+                (attachmentRecords, _) = await fetchAttachments(
+                    for: message, network: chat.network, chatTitle: displayTitle, date: date
+                )
             }
-
             let record = MessageRecord(
-                id: message.id,
-                ts: message.timestamp,
-                from: Sender(
-                    id: message.senderID,
-                    name: message.senderName,
-                    self: message.isSender
-                ),
-                text: message.text,
-                type: message.type,
-                attachments: attachmentRecords,
-                replyTo: message.linkedMessageID
+                id: message.id, ts: message.timestamp,
+                from: Sender(id: message.senderID, name: message.senderName, self: message.isSender),
+                text: message.text, type: message.type,
+                attachments: attachmentRecords, replyTo: message.linkedMessageID
             )
-            try logWriter.write(record: record, toDir: chatDir)
+            try await logWriter.write(record: record, toDir: chatDir)
         }
 
         // Update state to latest message
         if let lastMsg = sorted.last {
-            stateStore.update(
+            await stateStore.update(
                 chatID: chat.id,
                 lastSortKey: lastMsg.sortKey,
                 lastActivity: chat.lastActivity
             )
-            try stateStore.save()
+            try await stateStore.save()
         }
 
         return sorted.count
@@ -412,6 +356,51 @@ class SyncEngine {
             firstSeen: now,
             lastUpdated: now
         )
+    }
+
+    /// Download all attachments for a single message concurrently, preserving order.
+    /// Returns records and a count of failures (silent — failures are non-fatal for text training data).
+    func fetchAttachments(
+        for message: Message,
+        network: String,
+        chatTitle: String,
+        date: String
+    ) async -> (records: [AttachmentRecord], failed: Int) {
+        let attachments = message.attachments ?? []
+        guard !attachments.isEmpty else { return ([], 0) }
+
+        var ordered = [AttachmentRecord?](repeating: nil, count: attachments.count)
+        var failCount = 0
+        await withTaskGroup(of: (Int, AttachmentRecord, Bool).self) { group in
+            for (i, attachment) in attachments.enumerated() {
+                group.addTask {
+                    do {
+                        let localPath = try await self.attachmentFetcher.fetch(
+                            attachment: attachment,
+                            network: network,
+                            chatTitle: chatTitle,
+                            date: date
+                        )
+                        return (i, AttachmentRecord(
+                            id: attachment.id, type: attachment.type,
+                            localPath: localPath, mimeType: attachment.mimeType,
+                            fileName: attachment.fileName
+                        ), false)
+                    } catch {
+                        return (i, AttachmentRecord(
+                            id: attachment.id, type: attachment.type,
+                            localPath: nil, mimeType: attachment.mimeType,
+                            fileName: attachment.fileName
+                        ), true)
+                    }
+                }
+            }
+            for await (i, record, didFail) in group {
+                ordered[i] = record
+                if didFail { failCount += 1 }
+            }
+        }
+        return (ordered.compactMap { $0 }, failCount)
     }
 
     private func extractDate(from timestamp: String) -> String {
