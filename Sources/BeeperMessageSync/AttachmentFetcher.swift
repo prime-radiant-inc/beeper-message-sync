@@ -30,7 +30,7 @@ struct AttachmentFetcher {
             let response = try await client.downloadAsset(url: assetID)
             guard let srcURL = response.srcURL else {
                 if let error = response.error {
-                    print("  Warning: attachment download failed: \(error)")
+                    print("  attachment download failed: \(error.prefix(120))")
                 }
                 return nil
             }

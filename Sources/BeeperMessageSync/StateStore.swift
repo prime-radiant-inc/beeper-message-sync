@@ -5,7 +5,7 @@ struct ChatState: Codable {
     var lastActivity: String?
 }
 
-class StateStore {
+actor StateStore {
     private let path: String
     private var chats: [String: ChatState]
 
