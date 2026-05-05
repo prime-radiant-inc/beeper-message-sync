@@ -36,7 +36,7 @@ case "backfill-imessage":
     try await runImessageBackfill(engine: engine)
 case "watch":
     try acquirePidLock(pidFile: NSHomeDirectory() + "/.config/beeper-message-sync/daemon.pid")
-    if !engine.stateStore.hasState {
+    if await !engine.stateStore.hasState {
         print("No state found. Running initial backfill...")
         try await runBackfill(engine: engine)
     }
@@ -55,36 +55,37 @@ default:
     print("  --chat <titles>    Comma-separated chat titles (substring match)")
     print("  --since <date>     Only messages after this date (YYYY-MM-DD)")
     print("  --until <date>     Only messages before this date (YYYY-MM-DD)")
+    print("  --skip-attachments Skip downloading attachments (text only)")
     exit(1)
 }
 
 // MARK: - Functions
 
 func runBackfill(engine: SyncEngine) async throws {
+    let concurrency = 10
+
+    // Collect all chats, separating already-backfilled from pending
     var cursor: String? = nil
-    var chatIndex = 0
-    var failCount = 0
+    var allChats: [(index: Int, chat: Chat)] = []
     var skipCount = 0
+    var alreadyDone = 0
     var seenIDs = Set<String>()
 
     repeat {
         let response = try await engine.client.listChats(cursor: cursor)
         for chat in response.items {
             guard seenIDs.insert(chat.id).inserted else { continue }
-            chatIndex += 1
             let resolved = engine.resolvedTitle(for: chat)
             if !engine.filter.matchesChat(chat, resolvedTitle: resolved) {
                 skipCount += 1
                 continue
             }
-            print("  [\(chatIndex)] \(chat.network): \(chat.title)...", terminator: "")
-            do {
-                let count = try await engine.backfillChat(chat)
-                print(" \(count) messages")
-            } catch {
-                print(" ERROR: \(error.localizedDescription)")
-                failCount += 1
+            // Skip chats that completed a previous backfill
+            if await engine.stateStore.lastSortKey(for: chat.id) != nil {
+                alreadyDone += 1
+                continue
             }
+            allChats.append((allChats.count + 1, chat))
         }
         if response.hasMore, let nextCursor = response.oldestCursor {
             cursor = nextCursor
@@ -93,10 +94,67 @@ func runBackfill(engine: SyncEngine) async throws {
         }
     } while true
 
-    var summary = "Backfill complete. \(chatIndex) chats"
-    if skipCount > 0 { summary += ", \(skipCount) skipped" }
-    if failCount > 0 { summary += ", \(failCount) failed" }
-    summary += "."
+    let dim  = "\u{001B}[2m"
+    let reset = "\u{001B}[0m"
+    let total = allChats.count
+    var header = "Found \(total) chats to backfill"
+    if alreadyDone > 0 { header += " \(dim)(\(alreadyDone) already done)\(reset)" }
+    if skipCount  > 0 { header += " \(dim)(\(skipCount) filtered)\(reset)" }
+    if total > 0      { header += ". Running \(concurrency) in parallel..." }
+    else              { header += " — nothing to do." }
+    print(header)
+    guard total > 0 else { return }
+
+    let display = ProgressDisplay(total: total, concurrency: concurrency)
+    var failCount = 0
+
+    await withTaskGroup(of: (Int, Result<Int, Error>).self) { group in
+        var submitted = 0
+
+        func submitNext() {
+            guard submitted < allChats.count else { return }
+            let (idx, chat) = allChats[submitted]
+            submitted += 1
+            display.startChat(
+                idx: idx,
+                network: chat.network,
+                title: engine.resolvedTitle(for: chat)
+            )
+            group.addTask {
+                do {
+                    let count = try await engine.backfillChat(chat)
+                    return (idx, .success(count))
+                } catch {
+                    return (idx, .failure(error))
+                }
+            }
+        }
+
+        for _ in 0..<min(concurrency, total) { submitNext() }
+
+        for await (idx, result) in group {
+            switch result {
+            case .success(let count):
+                display.completeChat(idx: idx, count: count)
+            case .failure(let error):
+                display.failChat(idx: idx, error: error.localizedDescription)
+                failCount += 1
+            }
+            submitNext()
+        }
+    }
+
+    display.finish()
+
+    let ansiReset = "\u{001B}[0m"
+    let bold      = "\u{001B}[1m"
+    let green     = "\u{001B}[32m"
+    let red       = "\u{001B}[31m"
+    var summary = "\(bold)Backfill complete.\(ansiReset) \(total) chats"
+    if alreadyDone > 0 { summary += ", \(alreadyDone) already done" }
+    if skipCount   > 0 { summary += ", \(skipCount) filtered" }
+    if failCount   > 0 { summary += ", \(red)\(failCount) failed\(ansiReset)" }
+    else { summary += " \(green)✓\(ansiReset)" }
     print(summary)
 }
 
@@ -213,7 +271,7 @@ func runImessageBackfill(engine: SyncEngine) async throws {
                     attachments: attachmentRecords,
                     replyTo: msg.replyToGuid
                 )
-                try engine.logWriter.write(record: record, toDir: chatDir)
+                try await engine.logWriter.write(record: record, toDir: chatDir)
                 written += 1
             }
             msgTotal += written
@@ -281,6 +339,7 @@ func parseArgs() -> (mode: String, filter: SyncFilter) {
     var chatTitles: [String]?
     var since: Date?
     var until: Date?
+    var skipAttachments = false
 
     let dateFormatter = DateFormatter()
     dateFormatter.dateFormat = "yyyy-MM-dd"
@@ -318,6 +377,8 @@ func parseArgs() -> (mode: String, filter: SyncFilter) {
                 exit(1)
             }
             until = date
+        case "--skip-attachments":
+            skipAttachments = true
         default:
             if arg.hasPrefix("-") {
                 print("Unknown option: \(arg)")
@@ -332,7 +393,8 @@ func parseArgs() -> (mode: String, filter: SyncFilter) {
         networks: networks,
         chatTitles: chatTitles,
         since: since,
-        until: until
+        until: until,
+        skipAttachments: skipAttachments
     )
     return (mode, filter)
 }

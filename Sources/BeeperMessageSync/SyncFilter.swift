@@ -5,17 +5,20 @@ struct SyncFilter: Sendable {
     let chatTitles: Set<String>?
     let since: Date?
     let until: Date?
+    let skipAttachments: Bool
 
     init(
         networks: (any Sequence<String>)? = nil,
         chatTitles: (any Sequence<String>)? = nil,
         since: Date? = nil,
-        until: Date? = nil
+        until: Date? = nil,
+        skipAttachments: Bool = false
     ) {
         self.networks = networks.map { Set($0.map { $0.lowercased() }) }
         self.chatTitles = chatTitles.map { Set($0.map { $0.lowercased() }) }
         self.since = since
         self.until = until
+        self.skipAttachments = skipAttachments
     }
 
     /// Check if a chat matches the network and title filters.
