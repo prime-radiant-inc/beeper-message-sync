@@ -1,0 +1,14 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: beeper-message-sync
+  description: "macOS CLI that syncs Beeper chat history to local JSONL files with attachments."
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+    prime-radiant.com/repo-map-rev: "2853c150d88ad3f5227360d87a17aa8e4c5bb096"
+  tags: [swift, cli, macos, beeper, chat-export]
+spec:
+  type: tool
+  lifecycle: production
+  owner: user:obra
+  system: dev-tools
