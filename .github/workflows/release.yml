@@ -15,7 +15,7 @@ jobs:
       ARTIFACTS_DIR: ${{ github.workspace }}/dist
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build arm64
         run: swift build -c release --arch arm64
